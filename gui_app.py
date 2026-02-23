@@ -13,7 +13,7 @@ from video_player import VideoPlayer
 class CustomModelApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("VAD AI Studio v21 (Smart Navigation & Interaction)")
+        self.root.title("VAD AI Studio v21 (Fixed & Stable)")
         self.root.geometry("1300x850")
         
         self.engine = HyperTranscriptionEngine()
@@ -36,11 +36,10 @@ class CustomModelApp:
         self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashrelief=tk.RAISED, sashwidth=6)
         self.main_paned.pack(fill=tk.BOTH, expand=True)
 
-        # 왼쪽: 비디오 플레이어
+        # 왼쪽: 비디오 플레이어 영역
         left_f = tk.Frame(self.main_paned, bg="#1a1a1a")
         self.main_paned.add(left_f, minsize=750)
 
-        # 영상 캔버스: 클릭 시 재생/정지
         self.video_canvas = tk.Frame(left_f, bg="black")
         self.video_canvas.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         self.video_canvas.bind("<Button-1>", lambda e: self.toggle_play())
@@ -74,15 +73,46 @@ class CustomModelApp:
         self.btn_analyze = tk.Button(af, text="분석 시작", command=self.on_start_analysis, bg="#2980b9", fg="white", font=("bold"), pady=12, state=tk.DISABLED)
         self.btn_analyze.pack(fill=tk.X, pady=5)
 
-                self.btn_stop = tk.Button(af, text="작업 중지", command=self.on_stop_action, bg="#c0392b", fg="white", font=("bold"), state=tk.DISABLED); self.btn_stop.pack(fill=tk.X, pady=2)
+        self.btn_stop = tk.Button(af, text="작업 중지", command=self.on_stop_action, bg="#c0392b", fg="white", font=("bold"), state=tk.DISABLED); self.btn_stop.pack(fill=tk.X, pady=2)
+
+        # 상태 표시 및 프로그레스바
+        self.lbl_status = tk.Label(right_f, text="준비됨", fg="#27ae60", font=("bold", 10)); self.lbl_status.pack(fill=tk.X, pady=5)
+        self.progress_var = tk.DoubleVar(); ttk.Progressbar(right_f, variable=self.progress_var).pack(fill=tk.X, pady=5)
+
+        # 결과 리스트 (Treeview) - 유실되었던 부분 복구
+        list_f = tk.Frame(right_f)
+        list_f.pack(fill=tk.BOTH, expand=True, pady=10)
         
-                # 상태 표시 및 프로그레스바를 리스트 위로 이동
-                self.lbl_status = tk.Label(right_f, text="준비됨", fg="#27ae60", font=("bold", 10)); self.lbl_status.pack(fill=tk.X, pady=5)
-                self.progress_var = tk.DoubleVar(); ttk.Progressbar(right_f, variable=self.progress_var).pack(fill=tk.X, pady=5)
+        columns = ("no", "start", "end", "text")
+        self.tree = ttk.Treeview(list_f, columns=columns, show="headings")
+        self.tree.heading("no", text="No"); self.tree.heading("start", text="시작"); self.tree.heading("end", text="종료"); self.tree.heading("text", text="내용/길이")
+        self.tree.column("no", width=40, anchor=tk.CENTER); self.tree.column("start", width=80, anchor=tk.CENTER); self.tree.column("end", width=80, anchor=tk.CENTER); self.tree.column("text", width=250)
         
-                # 결과 리스트: 시작/종료 컬럼 분리
-                list_f = tk.Frame(right_f)
-                list_f.pack(fill=tk.BOTH, expand=True, pady=10)
+        sc = ttk.Scrollbar(list_f, orient=tk.VERTICAL, command=self.tree.yview); self.tree.configure(yscrollcommand=sc.set)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); sc.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # 우클릭 메뉴 및 이벤트 바인딩
+        self.menu = tk.Menu(self.root, tearoff=0)
+        self.menu.add_command(label="시작 지점으로 이동", command=self.jump_to_start)
+        self.menu.add_command(label="종료 지점으로 이동", command=self.jump_to_end)
+        self.tree.bind("<Button-3>", self.show_context_menu)
+        self.tree.bind("<Button-1>", self.on_tree_click)
+
+        # 자막 설정 프레임
+        opt = tk.LabelFrame(right_f, text=" 상세 설정 ", padx=10, pady=10)
+        opt.pack(fill=tk.X, pady=5)
+        
+        lf = tk.Frame(opt); lf.pack(fill=tk.X)
+        tk.Label(lf, text="대사 길이:").pack(side=tk.LEFT)
+        self.max_len_int = tk.IntVar(value=50); self.max_len_str = tk.StringVar(value="50")
+        tk.Scale(lf, from_=10, to=50, orient=tk.HORIZONTAL, variable=self.max_len_int, showvalue=0, command=lambda v: self.max_len_str.set(str(v))).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        tk.Entry(lf, textvariable=self.max_len_str, width=4).pack(side=tk.LEFT)
+
+        self.export_format = tk.StringVar(value="SRT")
+        ex = tk.Frame(opt, pady=5); ex.pack(fill=tk.X)
+        ttk.Combobox(ex, textvariable=self.export_format, values=["SRT", "VTT", "TXT", "CSV"], state="readonly", width=10).pack(side=tk.LEFT, padx=5)
+        tk.Button(ex, text="자막 내보내기", command=self.export_subtitles, bg="#e67e22", fg="white").pack(side=tk.LEFT, padx=5)
+
         self.update_loop()
 
     def bind_keys(self):
@@ -117,7 +147,7 @@ class CustomModelApp:
         threading.Thread(target=self.run_analysis, args=(self.current_video_path, self.stop_event), daemon=True).start()
 
     def run_analysis(self, p, stop_ev):
-        tmp = "refactored_temp.wav"; mode = self.mode_var.get()
+        tmp = "refactored_temp.wav"; mode = self.mode_var.get(); max_chars = self.max_len_int.get()
         try:
             self.root.after(0, lambda: self.lbl_status.config(text="오디오 추출 중...", fg="orange"))
             self.engine.extract_audio(p, tmp)
@@ -184,47 +214,33 @@ class CustomModelApp:
             self.root.after(0, lambda: [self.progress_var.set(v), self.lbl_status.config(text=f"인코딩 중 ({v}%){eta_str}")])
         try:
             success = self.video_editor.cut_silence(self.current_video_path, out_path, self.results_data, self.stop_event, update_progress)
-            if success: 
-                messagebox.showinfo("성공", f"저장 완료:\n{out_path}")
-                self.root.after(0, self.reset_action_button)
+            if success: messagebox.showinfo("성공", f"저장 완료:\n{out_path}"); self.root.after(0, self.reset_action_button)
         except Exception as e: messagebox.showerror("Error", f"편집 오류: {str(e)}")
         finally: self.root.after(0, lambda: [self.lbl_status.config(text="작업 완료", fg="#27ae60"), self.btn_stop.config(state=tk.DISABLED), self.btn_analyze.config(state=tk.NORMAL)])
 
     def on_tree_click(self, e):
-        """클릭한 컬럼에 따라 시작/종료 지점으로 지능형 이동"""
         region = self.tree.identify_region(e.x, e.y)
         if region == "cell":
-            column = self.tree.identify_column(e.x) # #1, #2, #3, ...
-            item = self.tree.identify_row(e.y)
+            column = self.tree.identify_column(e.x); item = self.tree.identify_row(e.y)
             if item:
                 values = self.tree.item(item)['values']
                 try:
-                    if column == "#3": # '종료' 컬럼 클릭 시
-                        t_sec = float(str(values[2]).replace('s',''))
-                    else: # 그 외(No, 시작, 내용) 클릭 시 '시작' 지점으로 이동
-                        t_sec = float(str(values[1]).replace('s',''))
-                    
+                    t_sec = float(str(values[2]).replace('s','')) if column == "#3" else float(str(values[1]).replace('s',''))
                     self.player.set_time(int(t_sec * 1000))
                     if not self.player.is_playing(): self.player.toggle_play()
                 except: pass
 
     def show_context_menu(self, e):
         item = self.tree.identify_row(e.y)
-        if item:
-            self.tree.selection_set(item)
-            self.menu.post(e.x_root, e.y_root)
+        if item: self.tree.selection_set(item); self.menu.post(e.x_root, e.y_root)
 
     def jump_to_start(self):
         sel = self.tree.selection()
-        if sel:
-            s_val = self.tree.item(sel)['values'][1]
-            self.player.set_time(int(float(str(s_val).replace('s','')) * 1000))
+        if sel: self.player.set_time(int(float(str(self.tree.item(sel)['values'][1]).replace('s','')) * 1000))
 
     def jump_to_end(self):
         sel = self.tree.selection()
-        if sel:
-            e_val = self.tree.item(sel)['values'][2]
-            self.player.set_time(int(float(str(e_val).replace('s','')) * 1000))
+        if sel: self.player.set_time(int(float(str(self.tree.item(sel)['values'][2]).replace('s','')) * 1000))
 
     def apply_preview_subtitles(self):
         if not self.results_data or not self.player: return
@@ -239,9 +255,7 @@ class CustomModelApp:
         except: pass
 
     def toggle_play(self):
-        if self.player:
-            is_p = self.player.toggle_play()
-            self.btn_play.config(text=self.ICON_PAUSE if is_p else self.ICON_PLAY)
+        if self.player: is_p = self.player.toggle_play(); self.btn_play.config(text=self.ICON_PAUSE if is_p else self.ICON_PLAY)
 
     def skip_time(self, ms): 
         if self.player: self.player.skip(ms)
