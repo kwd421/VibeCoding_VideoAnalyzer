@@ -1,0 +1,13 @@
+__pycache__/
+deprecated/
+*.wav
+*.srt
+*.mp4
+*.avi
+*.mkv
+*.mov
+.vscode/
+.idea/
+*.log
+temp_preview.srt
+refactored_temp.wav
