@@ -29,7 +29,7 @@ class VideoEditor:
         return merged, total_duration
 
     def get_media_info(self, video_path: str) -> Dict:
-        """[시니어 최적화] 파일의 물리적 크기, FPS 및 메타데이터 분석"""
+        """[시니어 리팩토링] ffprobe JSON 모드를 사용하여 견고하게 메타데이터 추출"""
         info = {
             "v_bitrate": 5000000, "a_bitrate": 128000, 
             "v_codec": "h264", "a_codec": "aac", "is_lossless": False,
@@ -37,23 +37,68 @@ class VideoEditor:
             "total_duration": 1.0,
             "fps": 30.0 
         }
-        cmd = [self.ffmpeg_path, "-i", video_path]
+        
         try:
-            process = subprocess.Popen(cmd, stderr=subprocess.PIPE, universal_newlines=True, encoding='utf-8', errors='replace')
-            _, stderr = process.communicate()
-            fps_match = re.search(r"(\d+(?:\.\d+)?)\s*fps", stderr)
-            if fps_match: info["fps"] = float(fps_match.group(1))
-            dur_match = re.search(r"Duration:\s+(\d+):(\d+):(\d+\.\d+)", stderr)
-            if dur_match:
-                h, m, s = map(float, dur_match.groups())
-                info["total_duration"] = h * 3600 + m * 60 + s
-            br_match = re.search(r"bitrate:\s+(\d+)\s+kb/s", stderr)
-            if br_match:
-                total_br = int(br_match.group(1)) * 1000
-                info["v_bitrate"] = int(total_br * 0.9); info["a_bitrate"] = int(total_br * 0.1)
-            if "h264" in stderr.lower(): info["v_codec"] = "h264"
-            elif "hevc" in stderr.lower() or "h265" in stderr.lower(): info["v_codec"] = "h265"
-        except: pass
+            import json
+            ffprobe_path = self.ffmpeg_path.replace("ffmpeg.exe", "ffprobe.exe") if "ffmpeg.exe" in self.ffmpeg_path else self.ffmpeg_path.replace("ffmpeg", "ffprobe")
+            if not os.path.exists(ffprobe_path):
+                raise FileNotFoundError("ffprobe not found")
+
+            cmd = [
+                ffprobe_path, 
+                "-v", "quiet", 
+                "-print_format", "json", 
+                "-show_format", 
+                "-show_streams", 
+                video_path
+            ]
+            
+            startupinfo = None
+            if os.name == 'nt':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            
+            process = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', startupinfo=startupinfo)
+            data = json.loads(process.stdout)
+            
+            if 'format' in data:
+                f_data = data['format']
+                info["total_duration"] = float(f_data.get('duration', 1.0))
+                total_rate = int(f_data.get('bit_rate', 5000000))
+                info['v_bitrate'] = int(total_rate * 0.85)
+                info['a_bitrate'] = 128000
+                
+            for stream in data.get('streams', []):
+                if stream['codec_type'] == 'video':
+                    info['v_codec'] = stream.get('codec_name', 'h264')
+                    if 'avg_frame_rate' in stream:
+                        num, den = map(int, stream['avg_frame_rate'].split('/'))
+                        if den > 0: info['fps'] = num / den
+                elif stream['codec_type'] == 'audio':
+                    info['a_codec'] = stream.get('codec_name', 'aac')
+                    if 'bit_rate' in stream:
+                        info['a_bitrate'] = int(stream['bit_rate'])
+        except Exception as e:
+            # 실패 시 기존 정규식 방식으로 Fallback
+            cmd = [self.ffmpeg_path, "-i", video_path]
+            try:
+                process = subprocess.Popen(cmd, stderr=subprocess.PIPE, universal_newlines=True, encoding='utf-8', errors='replace')
+                _, stderr = process.communicate()
+                import re
+                fps_match = re.search(r"(\d+(?:\.\d+)?)\s*fps", stderr)
+                if fps_match: info["fps"] = float(fps_match.group(1))
+                dur_match = re.search(r"Duration:\s+(\d+):(\d+):(\d+\.\d+)", stderr)
+                if dur_match:
+                    h, m, s = map(float, dur_match.groups())
+                    info["total_duration"] = h * 3600 + m * 60 + s
+                br_match = re.search(r"bitrate:\s+(\d+)\s+kb/s", stderr)
+                if br_match:
+                    total_br = int(br_match.group(1)) * 1000
+                    info["v_bitrate"] = int(total_br * 0.9); info["a_bitrate"] = int(total_br * 0.1)
+                if "h264" in stderr.lower(): info["v_codec"] = "h264"
+                elif "hevc" in stderr.lower() or "h265" in stderr.lower(): info["v_codec"] = "h265"
+            except: pass
+            
         return info
 
     def export_premiere_xml(self, video_path: str, segments: List[Dict], output_xml: str, fps: float = 30.0) -> bool:

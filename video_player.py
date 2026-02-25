@@ -1,5 +1,6 @@
 import vlc
 import time
+import os
 from typing import Tuple
 
 class VideoPlayer:
@@ -10,7 +11,8 @@ class VideoPlayer:
         self.player = None
         
         try:
-            self.instance = vlc.Instance()
+            # [시니어 최적화] 호환성 문제 방지를 위해 --fast-seek 제거, 코덱 설정 및 지연 프레임 드롭만 유지
+            self.instance = vlc.Instance("--no-xlib", "--avcodec-hw=any", "--drop-late-frames", "--skip-frames")
             self.player = self.instance.media_player_new()
             self.vlc_available = True
         except Exception as e:

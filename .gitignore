@@ -11,3 +11,11 @@ deprecated/
 *.log
 temp_preview.srt
 refactored_temp.wav
+
+# AI Models & Large Weights
+*.bin
+*.pt
+*.pth
+*.safetensors
+*.onnx
+models/
