@@ -60,6 +60,10 @@ class VideoPlayer:
         if self.vlc_available:
             self.player.stop()
 
+    def set_scale(self, factor: float):
+        if self.vlc_available and self.player:
+            self.player.video_set_scale(factor)
+
     def set_time(self, ms):
         if self.vlc_available:
             self.player.set_time(int(ms))

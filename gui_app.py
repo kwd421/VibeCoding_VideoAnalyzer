@@ -39,8 +39,16 @@ class CustomModelApp:
         left_f = tk.Frame(self.main_paned, bg="#1a1a1a")
         self.main_paned.add(left_f, minsize=750)
 
+        proxy_bg = tk.Frame(left_f, bg="#1a1a1a")
+        proxy_bg.pack(fill=tk.X, padx=5, pady=(5,0))
+        tk.Label(proxy_bg, text="👁️ 미리보기 해상도 (Proxy):", bg="#1a1a1a", fg="gray", font=("bold", 9)).pack(side=tk.LEFT, padx=5)
+        self.proxy_var = tk.StringVar(value="Full")
+        self.proxy_combo = ttk.Combobox(proxy_bg, textvariable=self.proxy_var, values=["Full", "Half (1/2)", "Quarter (1/4)"], state="readonly", width=15)
+        self.proxy_combo.pack(side=tk.LEFT, padx=5)
+        self.proxy_combo.bind("<<ComboboxSelected>>", self.on_proxy_change)
+
         self.video_canvas = tk.Frame(left_f, bg="black")
-        self.video_canvas.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.video_canvas.pack(fill=tk.BOTH, expand=True, padx=5, pady=(2, 5))
         self.video_canvas.bind("<Button-1>", lambda e: self.toggle_play())
 
         self.seek_var = tk.DoubleVar()
@@ -182,8 +190,27 @@ class CustomModelApp:
         p = filedialog.askopenfilename(filetypes=[("Video files", "*.mp4 *.avi *.mkv *.mov *.flv")])
         if p:
             self.current_video_path = p
-            if self.player.load_video(p): self.lbl_status.config(text="영상 로드됨: " + os.path.basename(p), fg="#2980b9"); self.reset_action_button()
+            if self.player.load_video(p): 
+                self.lbl_status.config(text="영상 로드됨: " + os.path.basename(p), fg="#2980b9")
+                self.reset_action_button()
+                # 비디오 로드 시 프록시 설정 초기화 또는 적용
+                self.on_proxy_change()
             else: messagebox.showerror("Error", "영상을 불러올 수 없습니다.")
+
+    def on_proxy_change(self, event=None):
+        if not self.player or not self.player.vlc_available: return
+        val = self.proxy_var.get()
+        if "Half" in val:
+            self.player.set_scale(0.5)
+        elif "Quarter" in val:
+            self.player.set_scale(0.25)
+        else:
+            self.player.set_scale(0.0) # 0 means auto fit
+        
+        # 적용 후 화면 강제 갱신 위해 잠시 재생/일시정지 트리거
+        if not self.player.is_playing() and self.current_video_path:
+            self.player.toggle_play()
+            self.root.after(50, lambda: self.player.toggle_play() if self.player.is_playing() else None)
 
     def on_stop_action(self):
         if self.stop_event and not self.stop_event.is_set(): 
