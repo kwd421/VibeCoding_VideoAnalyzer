@@ -39,14 +39,6 @@ class CustomModelApp:
         left_f = tk.Frame(self.main_paned, bg="#1a1a1a")
         self.main_paned.add(left_f, minsize=750)
 
-        proxy_bg = tk.Frame(left_f, bg="#1a1a1a")
-        proxy_bg.pack(fill=tk.X, padx=5, pady=(5,0))
-        tk.Label(proxy_bg, text="👁️ 미리보기 해상도 (Proxy):", bg="#1a1a1a", fg="gray", font=("bold", 9)).pack(side=tk.LEFT, padx=5)
-        self.proxy_var = tk.StringVar(value="Full")
-        self.proxy_combo = ttk.Combobox(proxy_bg, textvariable=self.proxy_var, values=["Full", "Half (1/2)", "Quarter (1/4)"], state="readonly", width=15)
-        self.proxy_combo.pack(side=tk.LEFT, padx=5)
-        self.proxy_combo.bind("<<ComboboxSelected>>", self.on_proxy_change)
-
         self.video_canvas = tk.Frame(left_f, bg="black")
         self.video_canvas.pack(fill=tk.BOTH, expand=True, padx=5, pady=(2, 5))
         self.video_canvas.bind("<Button-1>", lambda e: self.toggle_play())
@@ -56,6 +48,7 @@ class CustomModelApp:
         self.seek_bar.pack(fill=tk.X, padx=10, pady=2)
         self.seek_bar.bind("<ButtonPress-1>", self.on_seek_start)
         self.seek_bar.bind("<ButtonRelease-1>", self.on_seek_release)
+        self.seek_bar.bind("<B1-Motion>", self.on_seek_motion)
 
         ctrl = tk.Frame(left_f, bg="#2d2d2d", pady=10)
         ctrl.pack(fill=tk.X)
@@ -190,27 +183,21 @@ class CustomModelApp:
         p = filedialog.askopenfilename(filetypes=[("Video files", "*.mp4 *.avi *.mkv *.mov *.flv")])
         if p:
             self.current_video_path = p
-            if self.player.load_video(p): 
+            
+            # 기존에 로드된 자막 파일 연결 끊기
+            if hasattr(self, 'preview_srt_path'):
+                self.preview_srt_path = None
+                
+            if self.player.load_video(p):
                 self.lbl_status.config(text="영상 로드됨: " + os.path.basename(p), fg="#2980b9")
                 self.reset_action_button()
-                # 비디오 로드 시 프록시 설정 초기화 또는 적용
-                self.on_proxy_change()
-            else: messagebox.showerror("Error", "영상을 불러올 수 없습니다.")
+                
+                if hasattr(self, 'preview_srt_path') and getattr(self, 'preview_srt_path') and os.path.exists(self.preview_srt_path):
+                    self.root.after(300, self.apply_preview_subtitles)
+            else:
+                from tkinter import messagebox
+                messagebox.showerror("Error", "영상을 불러올 수 없습니다.")
 
-    def on_proxy_change(self, event=None):
-        if not self.player or not self.player.vlc_available: return
-        val = self.proxy_var.get()
-        if "Half" in val:
-            self.player.set_scale(0.5)
-        elif "Quarter" in val:
-            self.player.set_scale(0.25)
-        else:
-            self.player.set_scale(0.0) # 0 means auto fit
-        
-        # 적용 후 화면 강제 갱신 위해 잠시 재생/일시정지 트리거
-        if not self.player.is_playing() and self.current_video_path:
-            self.player.toggle_play()
-            self.root.after(50, lambda: self.player.toggle_play() if self.player.is_playing() else None)
 
     def on_stop_action(self):
         if self.stop_event and not self.stop_event.is_set(): 
@@ -439,7 +426,7 @@ class CustomModelApp:
                 # 시작 시간 클릭(#2) vs 종료 시간 클릭(#3) 분기 처리
                 if col == '#3': t_sec = float(str(val[2]).replace('s',''))
                 else: t_sec = float(str(val[1]).replace('s',''))
-                self.player.set_time(int(t_sec * 1000)); self.player.toggle_play() if not self.player.is_playing() else None
+                self.player.set_time(int(t_sec * 1000))
             except: pass
     def jump_to_start(self):
         sel = self.tree.selection()
@@ -467,11 +454,32 @@ class CustomModelApp:
         if self.player: self.player.skip(ms)
     def on_seek_start(self, e):
         self.is_seeking = True
+        self._was_playing_before_seek = self.player.is_playing() if self.player else False
+        if self.player:
+            self.player.set_mute(True)
+            if not self._was_playing_before_seek:
+                self.player.toggle_play() # 강제 갱신을 위해 재생 시작
+        self._update_seek_from_mouse(e)
+    def on_seek_motion(self, e):
+        if self.is_seeking: self._update_seek_from_mouse(e)
+    def on_seek_release(self, e):
+        if self.is_seeking: self._update_seek_from_mouse(e)
+        self.is_seeking = False
+        if self.player:
+            if getattr(self, '_was_playing_before_seek', False):
+                self.player.play() # 원래 재생 상태였다면 재생
+            else:
+                self.player.pause() # 원래 일시정지 상태였다면 정지
+            # 즉시 뮤트 해제 시 소리가 튈 수 있어 약간의 딜레이
+            self.root.after(100, lambda: self.player.set_mute(False) if self.player else None)
+    def _update_seek_from_mouse(self, e):
         try:
             w = self.seek_bar.winfo_width()
-            if w > 0: self.player.set_position(max(0, min(1, e.x/w)))
+            if w > 0 and self.player:
+                pos = max(0.0, min(1.0, e.x / w))
+                self.player.set_position(pos)
+                self.seek_var.set(pos * 1000)
         except: pass
-    def on_seek_release(self, e): self.is_seeking = False; self.player.toggle_play() if not self.player.is_playing() else None
     def update_loop(self):
         if self.player:
             if not self.is_seeking:
