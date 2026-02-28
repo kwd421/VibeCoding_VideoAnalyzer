@@ -118,7 +118,14 @@ class CustomModelApp:
         self.lang_combo.pack(side=tk.LEFT, padx=5)
 
         vad_f = tk.Frame(opt); vad_f.pack(fill=tk.X, pady=2)
-        tk.Label(vad_f, text="무음/패딩:").pack(side=tk.LEFT)
+        
+        # [시니어 추가] VAD 필터 옵션
+        self.use_silero_vad_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(vad_f, text="외부 VAD (Silero)", variable=self.use_silero_vad_var).pack(side=tk.LEFT)
+        self.use_whisper_vad_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(vad_f, text="내부 VAD (Whisper)", variable=self.use_whisper_vad_var).pack(side=tk.LEFT, padx=5)
+
+        tk.Label(vad_f, text="무음/패딩:").pack(side=tk.LEFT, padx=(10, 0))
         self.silence_dur_var = tk.DoubleVar(value=2.0); tk.Entry(vad_f, textvariable=self.silence_dur_var, width=4).pack(side=tk.LEFT, padx=2)
         tk.Label(vad_f, text="s /").pack(side=tk.LEFT)
         self.speech_pad_var = tk.DoubleVar(value=0.1); tk.Entry(vad_f, textvariable=self.speech_pad_var, width=4).pack(side=tk.LEFT, padx=2)
@@ -236,7 +243,8 @@ class CustomModelApp:
             "min_silence_ms": min_sil_ms,
             "speech_pad_ms": pad_ms,
             "use_word_timestamps": True,
-            "use_whisper_vad": True,
+            "use_whisper_vad": self.use_whisper_vad_var.get(),
+            "use_silero_vad": self.use_silero_vad_var.get(),
             "device_mode": mapped_dev
         }
         

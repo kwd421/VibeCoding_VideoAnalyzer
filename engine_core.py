@@ -215,7 +215,8 @@ class HyperTranscriptionEngine:
         speech_pad_ms = options.get("speech_pad_ms", 250)
         split_gap_sec = max(1.0, min_silence_ms / 1000.0)
         use_word_timestamps = options.get("use_word_timestamps", True)
-        use_whisper_vad = options.get("use_whisper_vad", True) # 엔진 내부 기본값도 True로 고정
+        use_whisper_vad = options.get("use_whisper_vad", True)
+        use_silero_vad = options.get("use_silero_vad", True)
 
         # 소음 제거 적용
         if use_denoise:
@@ -237,22 +238,23 @@ class HyperTranscriptionEngine:
                 
                 chunk, offset = audio_data[start_idx:end_idx], start_idx / 16000
                 if len(chunk) > 16000:
-                    # [시니어 최적화] VAD-Whisper 2-Tier Architecture 도입: Silero VAD로 얻은 정확한 시간(초벌) 구간에서만 대사를 변환해 강제 매칭
-                    vad_model = self.get_vad_model(device_mode)
-                    tss = get_speech_timestamps(torch.from_numpy(chunk), vad_model, sampling_rate=16000, threshold=vad_threshold, min_speech_duration_ms=150, min_silence_duration_ms=min_silence_ms, speech_pad_ms=speech_pad_ms)
-                    
-                    raw_results = []
-                    # [시니어 최적화] VAD 경계값을 순차적으로 사전 확보
+                    # [시니어 최적화] VAD-Whisper 2-Tier Architecture 도입 여부
                     safe_tss = []
-                    last_end_time = 0.0
-                    for ts in tss:
-                        vad_s = ts['start'] / 16000.0
-                        vad_e = ts['end'] / 16000.0
-                        if vad_e <= last_end_time: continue
-                        vad_s = max(vad_s, last_end_time)
-                        if vad_s >= vad_e: continue
-                        safe_tss.append((vad_s, vad_e))
-                        last_end_time = max(last_end_time, vad_e)
+                    if use_silero_vad:
+                        vad_model = self.get_vad_model(device_mode)
+                        tss = get_speech_timestamps(torch.from_numpy(chunk), vad_model, sampling_rate=16000, threshold=vad_threshold, min_speech_duration_ms=150, min_silence_duration_ms=min_silence_ms, speech_pad_ms=speech_pad_ms)
+                        
+                        last_end_time = 0.0
+                        for ts in tss:
+                            vad_s = ts['start'] / 16000.0
+                            vad_e = ts['end'] / 16000.0
+                            if vad_e <= last_end_time: continue
+                            vad_s = max(vad_s, last_end_time)
+                            if vad_s >= vad_e: continue
+                            safe_tss.append((vad_s, vad_e))
+                            last_end_time = max(last_end_time, vad_e)
+                    else:
+                        safe_tss = [(0.0, len(chunk) / 16000.0)]
                         
                     def _process_ts(bounds):
                         vad_s, vad_e = bounds
@@ -277,26 +279,30 @@ class HyperTranscriptionEngine:
                         offset_vad = offset + vad_s
                         
                         # --- [500년 뱀파이어 절기] 물리적 절대 록온 (Absolute Physical Sync Lock-on) ---
-                        pad_sec = speech_pad_ms / 1000.0
-                        vad_true_start = min(pad_sec, sub_max_time)
-                        vad_true_end = max(sub_max_time - pad_sec, 0.0)
-                        
-                        window_size = 160 # 10ms
-                        if len(sub_chunk) >= window_size:
-                            n_windows = len(sub_chunk) // window_size
-                            windows = sub_chunk[:n_windows * window_size].reshape(n_windows, window_size)
-                            energies = np.sqrt(np.mean(windows**2, axis=1))
-                            max_nrg = np.max(energies)
-                            if max_nrg > 0.001:
-                                thresh = max(0.001, max_nrg * 0.03) 
-                                for idx in range(n_windows):
-                                    if energies[idx] > thresh:
-                                        vad_true_start = max(vad_true_start, max(0, idx - 1) * 0.01)
-                                        break
-                                for idx in range(n_windows - 1, -1, -1):
-                                    if energies[idx] > thresh:
-                                        vad_true_end = min(vad_true_end, min(n_windows - 1, idx + 1) * 0.01)
-                                        break
+                        if use_silero_vad:
+                            pad_sec = speech_pad_ms / 1000.0
+                            vad_true_start = min(pad_sec, sub_max_time)
+                            vad_true_end = max(sub_max_time - pad_sec, 0.0)
+                            
+                            window_size = 160 # 10ms
+                            if len(sub_chunk) >= window_size:
+                                n_windows = len(sub_chunk) // window_size
+                                windows = sub_chunk[:n_windows * window_size].reshape(n_windows, window_size)
+                                energies = np.sqrt(np.mean(windows**2, axis=1))
+                                max_nrg = np.max(energies)
+                                if max_nrg > 0.001:
+                                    thresh = max(0.001, max_nrg * 0.03) 
+                                    for idx in range(n_windows):
+                                        if energies[idx] > thresh:
+                                            vad_true_start = max(vad_true_start, max(0, idx - 1) * 0.01)
+                                            break
+                                    for idx in range(n_windows - 1, -1, -1):
+                                        if energies[idx] > thresh:
+                                            vad_true_end = min(vad_true_end, min(n_windows - 1, idx + 1) * 0.01)
+                                            break
+                        else:
+                            vad_true_start = 0.0
+                            vad_true_end = sub_max_time
                         # -----------------------------------------------------------------------------
                         
                         segs_list = list(segs)
