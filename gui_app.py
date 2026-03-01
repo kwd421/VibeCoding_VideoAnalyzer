@@ -169,7 +169,7 @@ class CustomModelApp:
                     self.lbl_status.config(text=task["text"], fg="#27ae60"); self.progress_var.set(100)
                     self.btn_analyze.config(state=tk.NORMAL) # [시니어 수정] 분석 버튼은 항상 살려둠
                     if task.get("is_vad"): 
-                        self.save_frame.pack(fill=tk.X, pady=5)
+                        self.save_frame.pack(fill=tk.X, pady=5, before=self.lbl_status)
                         # [시니어 추가] 렌더링 종료 후 다른 방식(또는 XML)으로 무한 재저장 할 수 있도록 버튼 락 해제
                         for b in [self.btn_fast_save, self.btn_pro_save, self.btn_xml_save]: b.config(state=tk.NORMAL)
                     

@@ -97,6 +97,7 @@ class HyperTranscriptionEngine:
     def detect_speech_vad_stream(self, audio_data, stop_event, min_silence_ms=2000, speech_pad_ms=250, options=None):
         options = options or {}
         device_mode = options.get("device_mode", "auto")
+        vad_threshold = options.get("vad_threshold", 0.35)
         model = self.get_vad_model(device_mode)
         sample_rate, chunk_size, overlap = 16000, 16000 * 60, 16000 * 2
         total_samples = len(audio_data)
@@ -104,7 +105,7 @@ class HyperTranscriptionEngine:
         for i in range(0, total_samples, chunk_size):
             if stop_event.is_set(): break
             start, end = i, min(i + chunk_size + overlap, total_samples)
-            tss = get_speech_timestamps(torch.from_numpy(audio_data[start:end]), model, sampling_rate=sample_rate, threshold=0.35, min_speech_duration_ms=150, min_silence_duration_ms=min_silence_ms, speech_pad_ms=speech_pad_ms)
+            tss = get_speech_timestamps(torch.from_numpy(audio_data[start:end]), model, sampling_rate=sample_rate, threshold=vad_threshold, min_speech_duration_ms=150, min_silence_duration_ms=min_silence_ms, speech_pad_ms=speech_pad_ms)
             offset, chunk_results = start / sample_rate, []
             for ts in tss:
                 s_t, e_t = offset + ts['start']/sample_rate, offset + ts['end']/sample_rate
