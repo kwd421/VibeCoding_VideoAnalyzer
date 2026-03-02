@@ -26,6 +26,10 @@ class VideoPlayer:
             if self.player.is_playing():
                 self.player.stop()
                 
+            old_media = self.player.get_media()
+            if old_media:
+                old_media.release()
+                
             media = self.instance.media_new(video_path)
             
             media.add_option(":avcodec-hw=any") # 하드웨어 가속 강제 (VLC 자체 프록시 미사용)

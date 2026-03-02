@@ -2,7 +2,6 @@ import os
 import sys
 import threading
 import time
-import queue
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import numpy as np
@@ -10,8 +9,22 @@ import vlc
 from engine_core import HyperTranscriptionEngine
 from video_editor import VideoEditor
 from video_player import VideoPlayer
+from config_models import AnalysisSettings
+from config_models import AnalysisSettings
+from timeline_manager import TranscriptManager
+from event_dispatcher import EventEmitter
+from analysis_controller import AnalysisController
+from ui_block_editor import UIBlockEditor
 
 class CustomModelApp:
+    @property
+    def results_data(self):
+        return self.transcript_manager.get_all()
+        
+    @results_data.setter
+    def results_data(self, val):
+        if val == []:
+            self.transcript_manager.clear()
     def __init__(self, root):
         self.root = root
         self.root.title("VAD AI Studio v25 (Vision Integrated)")
@@ -20,17 +33,42 @@ class CustomModelApp:
         self.video_editor = VideoEditor()
         self.player = None
         self.stop_event = threading.Event()
-        self.results_data = []
+        self.transcript_manager = TranscriptManager()
         self.current_video_path = None
         self.is_seeking = False
         self.ICON_PLAY = chr(9654); self.ICON_PAUSE = chr(9208)
-        self.ui_queue = queue.Queue()
+        self.dispatcher = EventEmitter()
+        self.controller = AnalysisController(self.engine, self.video_editor, self.transcript_manager, self.dispatcher)
         self.setup_ui()
         self.player = VideoPlayer(self.video_canvas.winfo_id())
         self.bind_keys()
+        self.bind_events()
         self.load_engine_async()
-        self.process_ui_queue()
         self.update_loop()
+
+    def bind_events(self):
+        self.dispatcher.on("progress", lambda x: self.root.after(0, lambda: self._on_progress(x)))
+        self.dispatcher.on("add_row", lambda x: self.root.after(0, lambda: self._on_add_row(x)))
+        self.dispatcher.on("complete", lambda x: self.root.after(0, lambda: self._on_complete(x)))
+        self.dispatcher.on("message", lambda x: self.root.after(0, lambda: messagebox.showinfo("완료", x["text"])))
+        self.dispatcher.on("error", lambda x: self.root.after(0, lambda: messagebox.showerror("오류", x["text"])))
+        self.dispatcher.on("ghost_defense", lambda x: self.root.after(0, lambda: [self.reset_action_button(), self.btn_stop.config(state=tk.DISABLED)]))
+
+    def _on_progress(self, task):
+        self.progress_var.set(task["value"]); self.lbl_status.config(text=task["text"])
+        
+    def _on_add_row(self, task):
+        self.tree.insert("", "end", values=(task["i"], self.format_time(task['s']), self.format_time(task['e']), task['t']))
+        
+    def _on_complete(self, task):
+        self.lbl_status.config(text=task["text"], fg="#27ae60"); self.progress_var.set(100)
+        self.btn_analyze.config(state=tk.NORMAL)
+        if task.get("is_vad"): 
+            self.save_frame.pack(fill=tk.X, pady=5, before=self.lbl_status)
+            for b in [self.btn_fast_save, self.btn_pro_save, self.btn_xml_save]: b.config(state=tk.NORMAL)
+        
+        if task.get("is_whisper"): self.apply_preview_subtitles()
+        self.btn_stop.config(state=tk.DISABLED)
 
     def setup_ui(self):
         self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashrelief=tk.RAISED, sashwidth=6)
@@ -98,16 +136,16 @@ class CustomModelApp:
 
         self.tree = ttk.Treeview(self.tab_tree, columns=("no", "start", "end", "text"), show="headings"); self.tree.heading("no", text="No"); self.tree.heading("start", text="시작"); self.tree.heading("end", text="종료"); self.tree.heading("text", text="내용/길이"); self.tree.column("no", width=40, anchor=tk.CENTER); self.tree.column("start", width=80, anchor=tk.CENTER); self.tree.column("end", width=80, anchor=tk.CENTER); self.tree.column("text", width=250); sc = ttk.Scrollbar(self.tab_tree, orient=tk.VERTICAL, command=self.tree.yview); self.tree.configure(yscrollcommand=sc.set); self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); sc.pack(side=tk.RIGHT, fill=tk.Y)
         
-        self.init_block_view(self.tab_canvas)
+        self.block_editor = UIBlockEditor(self.tab_canvas, self.root, self.transcript_manager, self.player, self.rebuild_tree_and_render)
         def _on_tab_changed(e):
             idx = self.notebook.index(self.notebook.select())
             if idx == 1:
-                self.render_block_view()
+                self.block_editor.render_block_view()
                 # [시니어 최적화] 리스트 스크롤 비율을 캔버스로 복사
-                self.block_canvas.yview_moveto(self.tree.yview()[0])
+                self.block_editor.block_canvas.yview_moveto(self.tree.yview()[0])
             elif idx == 0:
                 # [시니어 최적화] 캔버스 스크롤 비율을 리스트로 복사
-                self.tree.yview_moveto(self.block_canvas.yview()[0])
+                self.tree.yview_moveto(self.block_editor.block_canvas.yview()[0])
         self.notebook.bind("<<NotebookTabChanged>>", _on_tab_changed)
         
         # 우클릭 메뉴 및 이벤트 바인딩 복구
@@ -191,35 +229,7 @@ class CustomModelApp:
                 return int(parts[0]) * 60 + float(parts[1])
         return float(str(t_str).replace("s", ""))
 
-    def process_ui_queue(self):
-        try:
-            while True:
-                task = self.ui_queue.get_nowait()
-                
-                # [CRITICAL] 중지 이벤트 발동 시, 엔진 스레드의 남은 보고서(UI 이벤트)를 완전히 무시/증발 시킴
-                if self.stop_event.is_set(): continue
-                
-                if task["action"] == "progress": self.progress_var.set(task["value"]); self.lbl_status.config(text=task["text"])
-                elif task["action"] == "add_row": self.tree.insert("", "end", values=(task["i"], self.format_time(task['s']), self.format_time(task['e']), task['t']))
-                elif task["action"] == "complete":
-                    self.lbl_status.config(text=task["text"], fg="#27ae60"); self.progress_var.set(100)
-                    self.btn_analyze.config(state=tk.NORMAL) # [시니어 수정] 분석 버튼은 항상 살려둠
-                    if task.get("is_vad"): 
-                        self.save_frame.pack(fill=tk.X, pady=5, before=self.lbl_status)
-                        # [시니어 추가] 렌더링 종료 후 다른 방식(또는 XML)으로 무한 재저장 할 수 있도록 버튼 락 해제
-                        for b in [self.btn_fast_save, self.btn_pro_save, self.btn_xml_save]: b.config(state=tk.NORMAL)
-                    
-                    if task.get("is_whisper"): self.apply_preview_subtitles()
-                    self.btn_stop.config(state=tk.DISABLED)
-                elif task["action"] == "message": messagebox.showinfo("완료", task["text"])
-                elif task["action"] == "error": messagebox.showerror("Error", task["text"])
-        except queue.Empty: pass
-        finally: self.root.after(100, self.process_ui_queue)
-
-    def load_engine_async(self): threading.Thread(target=self._init_engine, daemon=True).start()
-    def _init_engine(self):
-        try: self.engine.get_model(); self.ui_queue.put({"action": "progress", "value": 0, "text": "엔진 준비 완료"})
-        except Exception as e: self.ui_queue.put({"action": "error", "text": f"엔진 로드 실패: {e}"})
+    def load_engine_async(self): threading.Thread(target=self.controller.init_engine, daemon=True).start()
 
     def reset_action_button(self): self.save_frame.pack_forget(); self.btn_analyze.config(text="분석 시작", command=self.on_start_analysis, bg="#2980b9", state=tk.NORMAL); self.btn_fast_save.config(state=tk.NORMAL); self.btn_pro_save.config(state=tk.NORMAL); self.btn_xml_save.config(state=tk.NORMAL)
     def on_select_video(self):
@@ -245,13 +255,9 @@ class CustomModelApp:
     def on_stop_action(self):
         if self.stop_event and not self.stop_event.is_set(): 
             self.stop_event.set()
-            # [CRITICAL] 즉시 반응 확보 및 기존 내역 완전 증발
-            while not self.ui_queue.empty(): 
-                try: self.ui_queue.get_nowait()
-                except: pass
+            # 큐를 완전 증발 시킬 필요가 없어짐 (이벤트 구독 구조이므로 stop_event가 set되면 컨트롤러가 발송 중단함)
             self.lbl_status.config(text="■ 작업 중지 중... 완전 종료 대기", fg="red")
             self.btn_stop.config(state=tk.DISABLED)
-            # 메인 스레드에서 UI를 직접 강제 정화시킴
             self.root.after(1500, lambda: self.reset_action_button() or self.lbl_status.config(text="작업 중지됨", fg="red"))
 
     def on_start_analysis(self):
@@ -269,172 +275,27 @@ class CustomModelApp:
         elif "mps" in device_val: mapped_dev = "mps"
         else: mapped_dev = "cpu"
 
-        analysis_options = {
-            "initial_prompt": self.initial_prompt_var.get(),
-            "beam_size": self.beam_size_var.get(),
-            "use_denoise": self.use_denoise_var.get(),
-            "use_dominant": self.use_dominant_var.get(),
-            "language": self.lang_var.get().split("(")[-1].replace(")", "").strip(),
-            "vad_threshold": self.vad_threshold_var.get(),
-            "min_silence_ms": min_sil_ms,
-            "speech_pad_ms": pad_ms,
-            "use_word_timestamps": True,
-            "use_whisper_vad": self.use_whisper_vad_var.get(),
-            "use_silero_vad": self.use_silero_vad_var.get(),
-            "device_mode": mapped_dev
-        }
+        analysis_options = AnalysisSettings(
+            initial_prompt=self.initial_prompt_var.get(),
+            beam_size=self.beam_size_var.get(),
+            use_denoise=self.use_denoise_var.get(),
+            use_dominant=self.use_dominant_var.get(),
+            language=self.lang_var.get().split("(")[-1].replace(")", "").strip(),
+            vad_threshold=self.vad_threshold_var.get(),
+            min_silence_ms=min_sil_ms,
+            speech_pad_ms=pad_ms,
+            use_word_timestamps=True,
+            use_whisper_vad=self.use_whisper_vad_var.get(),
+            use_silero_vad=self.use_silero_vad_var.get(),
+            device_mode=mapped_dev
+        )
         
-        # 이전 큐가 조금이라도 남아있지 않도록 다시 한번 세척
-        while not self.ui_queue.empty():
-            try: self.ui_queue.get_nowait()
-            except: pass
-            
         self.stop_event = threading.Event(); self.btn_analyze.config(state=tk.DISABLED); self.btn_stop.config(state=tk.NORMAL); self.progress_var.set(0); self.results_data = []
         for i in self.tree.get_children(): self.tree.delete(i)
-        threading.Thread(target=self.run_analysis, args=(self.current_video_path, self.stop_event, mode, min_sil_ms, pad_ms, analysis_options), daemon=True).start()
-
-    def _smart_split_text(self, text, max_chars):
-        """[시니어 리팩토링] 긴 텍스트를 화면 길이에 맞춰 자연스럽게 분할합니다."""
-        clean_text = text.strip()
-        if len(clean_text) <= max_chars:
-            return [clean_text]
-
-        chunks = []
-        words = clean_text.split(' ')
-        current_chunk = []
-        current_len = 0
-
-        for word in words:
-            # 단어 하나가 너무 길면 강제로 자름 (예: "으아아아아아...")
-            if len(word) > max_chars:
-                if current_chunk:
-                    chunks.append(" ".join(current_chunk))
-                    current_chunk, current_len = [], 0
-                # 긴 단어 강제 분할
-                for i in range(0, len(word), max_chars):
-                    chunks.append(word[i:i+max_chars])
-                continue
-
-            # 현재 덩어리에 단어를 더했을 때 길이를 초과하는지 확인
-            if current_len + len(word) + (1 if current_chunk else 0) > max_chars:
-                chunks.append(" ".join(current_chunk))
-                current_chunk = [word]
-                current_len = len(word)
-            else:
-                current_chunk.append(word)
-                current_len += len(word) + (1 if current_chunk else 0)
         
-        if current_chunk:
-            chunks.append(" ".join(current_chunk))
-            
-        # [후처리] 마지막 줄이 너무 짧으면(예: "다.") 바로 앞줄에 붙여버림 (공간이 있다면)
-        if len(chunks) > 1:
-            last = chunks[-1]
-            prev = chunks[-2]
-            if len(last.replace(" ", "")) < max(3, int(max_chars * 0.4)) and len(prev) + len(last) + 1 <= max_chars * 1.5:
-                chunks[-2] = prev + " " + last
-                chunks.pop()
-                
-        return chunks
-
-    def _add_result_row(self, r):
-        """[시니어 헬퍼] 결과 데이터를 리스트와 UI 큐에 안전하게 추가 및 타임라인 겹침 방어"""
-        if self.results_data:
-            last_e = self.results_data[-1]['e']
-            # 과거로 돌아가거나 완전히 중복된 유령 구간 폐기
-            if r['e'] <= last_e: return 
-            # 시간이 살짝 겹쳤을 때는 이전 대사가 끝난 후로 시작점을 강제 보정 (최소 10ms 갭)
-            if r['s'] < last_e: r['s'] = last_e + 0.01 
-            
-        # VAD 등으로 표시되는 대사 길이용 시간 재계산 (구간이 잘렸을 경우 대비)
-        if r['t'].endswith('s') and ' ' not in r['t'] and '[' not in r['t']:
-            r['t'] = f"{(r['e'] - r['s']):.2f}s"
-            
-        self.results_data.append(r)
-        self.ui_queue.put({"action": "add_row", "i": len(self.results_data), "s": r['s'], "e": r['e'], "t": r['t']})
-
-    def run_analysis(self, p, stop_ev, mode, min_sil_ms, pad_ms, options=None):
-        try:
-            start_time = time.time()
-            max_chars = self.max_len_int.get()
-            
-            if "자동 챕터 분할" in mode:
-                labels = ["a person talking to camera, just chatting", "video game play screen", "web browser or document screen"]
-                for chunk_res, prog in self.engine.detect_scenes_clip_stream(p, labels, stop_ev, options=options):
-                    if stop_ev.is_set(): break
-                    self.ui_queue.put({"action": "progress", "value": prog, "text": f"비전 분석 중... ({int(prog)}%)"})
-                    for r in chunk_res: self._add_result_row(r)
-                if not stop_ev.is_set():
-                    total_elapsed = int(time.time() - start_time)
-                    self.ui_queue.put({"action": "complete", "text": f"챕터 분석 완료 (소요 시간: {total_elapsed//60}분 {total_elapsed%60}초)", "is_vad": True})
-                return
-
-            audio_data, duration = self.engine.load_audio_to_memory(p)
-            if stop_ev.is_set(): return
-            
-            if mode == "무음 제거 편집 (VAD)":
-                for chunk_res, prog in self.engine.detect_speech_vad_stream(audio_data, stop_ev, min_sil_ms, pad_ms, options=options):
-                    if stop_ev.is_set(): break
-                    elapsed = time.time() - start_time
-                    eta = int((elapsed / prog) * (100 - prog)) if prog > 5 else -1
-                    self.ui_queue.put({"action": "progress", "value": prog, "text": f"VAD 분석 중 ({int(prog)}%){f' (남은 시간: {eta//60}분 {eta%60}초)' if eta >= 0 else ''}"})
-                    for r in chunk_res: self._add_result_row(r)
-                if not stop_ev.is_set():
-                    total_elapsed = int(time.time() - start_time)
-                    self.ui_queue.put({"action": "complete", "text": f"분석 완료 (소요 시간: {total_elapsed//60}분 {total_elapsed%60}초)", "is_vad": True})
-            
-            elif "깜놀" in mode:
-                for chunk_res, prog in self.engine.detect_peaks_stream(audio_data, stop_ev):
-                    if stop_ev.is_set(): break
-                    elapsed = time.time() - start_time
-                    eta = int((elapsed / prog) * (100 - prog)) if prog > 5 else -1
-                    self.ui_queue.put({"action": "progress", "value": prog, "text": f"피크 감지 중 ({int(prog)}%){f' (남은 시간: {eta//60}분 {eta%60}초)' if eta >= 0 else ''}"})
-                    for r in chunk_res: self._add_result_row(r)
-                if not stop_ev.is_set():
-                    total_elapsed = int(time.time() - start_time)
-                    self.ui_queue.put({"action": "complete", "text": f"분석 완료 (소요 시간: {total_elapsed//60}분 {total_elapsed%60}초)", "is_vad": False})
-            
-            else:
-                gen, total_dur = self.engine.transcribe_stream_raw(audio_data, stop_ev, options=options)
-                last_upd, last_prog, ema_speed = time.time(), 0.0, 0.0
-                for r in gen:
-                    if stop_ev.is_set(): break
-                    
-                    text = r['t'].strip()
-                    
-                    if len(text) > max_chars:
-                        chunks = self._smart_split_text(text, max_chars)
-                        
-                        # 문자열 길이에 비례한 정확한 타임라인 재분배
-                        total_char_len = sum(len(c) for c in chunks)
-                        curr_ratio = 0.0
-                        for c in chunks:
-                            if not c: continue
-                            ratio = len(c) / total_char_len
-                            self._add_result_row({'s': r['s'] + (r['e']-r['s'])*curr_ratio, 'e': r['s'] + (r['e']-r['s'])*(curr_ratio+ratio), 't': c})
-                            curr_ratio += ratio
-                    else:
-                        self._add_result_row(r)
-                    
-                    prog = (r['e'] / total_dur) * 100; curr_t = time.time(); delta_t, delta_p = curr_t - last_upd, prog - last_prog
-                    if delta_t > 0.5 and delta_p > 0:
-                        curr_s = delta_p / delta_t
-                        ema_speed = curr_s if ema_speed == 0 else (ema_speed * 0.8) + (curr_s * 0.2)
-                        last_upd, last_prog = curr_t, prog
-                    eta_str = f" (남은 시간: {int((100-prog)/ema_speed)//60}분 {int((100-prog)/ema_speed)%60}초)" if ema_speed > 0 else " (남은 시간 계산 중...)"
-                    self.ui_queue.put({"action": "progress", "value": prog, "text": f"Whisper 분석 중 ({int(prog)}%){eta_str}"})
-                
-                if not stop_ev.is_set(): 
-                    is_combi = "컷편집" in mode
-                    total_elapsed = int(time.time() - start_time)
-                    complete_txt = f"분석 완료 ({total_elapsed//60}분 {total_elapsed%60}초)"
-                    self.ui_queue.put({"action": "complete", "text": complete_txt, "is_vad": is_combi, "is_whisper": True})
-        except Exception as ex:
-            if stop_ev is self.stop_event and not stop_ev.is_set(): self.ui_queue.put({"action": "error", "text": f"분석 오류: {str(ex)}"})
-        finally:
-            # [CRITICAL] 고스트 쓰레드 방어: 새 작업(새 쓰레드/이벤트)이 진행 중일 때는 이전 쓰레드가 UI의 중지 버튼 등을 훼손하지 못하게 차단
-            if stop_ev is self.stop_event and stop_ev.is_set(): 
-                self.root.after(0, lambda: [self.reset_action_button(), self.btn_stop.config(state=tk.DISABLED)])
+        # 컨트롤러에 작업 이관
+        max_chars = self.max_len_int.get()
+        threading.Thread(target=self.controller.run_analysis, args=(self.current_video_path, self.stop_event, mode, min_sil_ms, pad_ms, max_chars, analysis_options), daemon=True).start()
 
     def start_export(self, fast=True):
         media_info = self.video_editor.get_media_info(self.current_video_path); ext = os.path.splitext(self.current_video_path)[1].lower().strip('.')
@@ -443,7 +304,7 @@ class CustomModelApp:
             for b in [self.btn_fast_save, self.btn_pro_save, self.btn_xml_save]: b.config(state=tk.DISABLED)
             self.btn_stop.config(state=tk.NORMAL); self.progress_var.set(0)
             settings = {'v_codec': media_info.get('v_codec', 'h264'), 'a_codec': media_info.get('a_codec', 'aac'), 'v_bitrate': f"{media_info.get('v_bitrate', 5000000) // 1000}k", 'a_bitrate': f"{media_info.get('a_bitrate', 128000) // 1000}k", 'fast_mode': fast}
-            threading.Thread(target=self.run_editing, args=(save_path, settings), daemon=True).start()
+            threading.Thread(target=self.controller.run_editing, args=(self.current_video_path, save_path, self.results_data, self.stop_event, settings), daemon=True).start()
 
     def on_export_xml(self):
         save_path = filedialog.asksaveasfilename(defaultextension=".xml", filetypes=[("Final Cut Pro XML", "*.xml")], initialfile=f"Timeline_{os.path.splitext(os.path.basename(self.current_video_path))[0]}.xml")
@@ -454,13 +315,7 @@ class CustomModelApp:
                 else: messagebox.showerror("오류", "XML 생성 실패")
             except Exception as e: messagebox.showerror("오류", str(e))
 
-    def run_editing(self, out_path, settings):
-        def upd_p(v, eta): self.ui_queue.put({"action": "progress", "value": v, "text": f"렌더링 중 ({v}%){f' - 남은 시간: {int(eta//60)}분 {int(eta%60)}초' if eta >= 0 else ''}"})
-        try:
-            if self.video_editor.cut_silence(self.current_video_path, out_path, self.results_data, self.stop_event, upd_p, v_codec=settings['v_codec'], a_codec=settings['a_codec'], v_bitrate=settings['v_bitrate'], a_bitrate=settings['a_bitrate'], fast_mode=settings['fast_mode']): self.ui_queue.put({"action": "message", "text": f"작업 완료!\n{out_path}"})
-            else: self.ui_queue.put({"action": "error", "text": "렌더링 중 오류 발생"})
-        except Exception as e: self.ui_queue.put({"action": "error", "text": f"편집 오류: {str(e)}"})
-        finally: self.ui_queue.put({"action": "complete", "text": "작업 완료", "is_vad": True})
+
 
     def on_tree_click(self, e):
         item = self.tree.identify_row(e.y); col = self.tree.identify_column(e.x)
@@ -488,261 +343,16 @@ class CustomModelApp:
             x, y, w, h = bbox
             self._open_editor(item, x, y, max(w, 200), max(h, 20))
 
-    # ================= [시니어 시스템: 물리적 블록 마법진 (Drag & Drop)] =================
-    def init_block_view(self, parent):
-        self.block_canvas = tk.Canvas(parent, bg="#2c3e50", highlightthickness=0)
-        self.block_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        sc = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=self.block_canvas.yview)
-        sc.pack(side=tk.RIGHT, fill=tk.Y)
-        self.block_canvas.configure(yscrollcommand=sc.set)
-
-        self.block_canvas.bind("<ButtonPress-1>", self.on_block_press)
-        self.block_canvas.bind("<B1-Motion>", self.on_block_drag)
-        self.block_canvas.bind("<ButtonRelease-1>", self.on_block_release)
-        self.block_canvas.bind("<Double-1>", self.on_block_double)
-        
-        # [시니어 최적화] 탭2 캔버스 휠 스크롤 연동
-        self.tab_canvas.bind("<Enter>", lambda e: self.block_canvas.bind_all("<MouseWheel>", self.on_block_scroll))
-        self.tab_canvas.bind("<Leave>", lambda e: self.block_canvas.unbind_all("<MouseWheel>"))
-        self.block_canvas.bind("<Button-3>", self.on_block_right_click)
-
-        # [시니어 최적화] 분리/병합 우클릭 메뉴
-        self.block_menu = tk.Menu(self.root, tearoff=0)
-        self.block_menu.add_command(label="[분리] 현재 단어부터 다음 줄로 나누기", command=self.split_word_block)
-        
-        self.row_menu = tk.Menu(self.root, tearoff=0)
-        self.row_menu.add_command(label="[병합] 위 대사와 합치기", command=lambda: self.merge_row_block(-1))
-        self.row_menu.add_command(label="[병합] 아래 대사와 합치기", command=lambda: self.merge_row_block(1))
-
-        self.drag_data = {"items": [], "idx": -1, "w_idx": -1, "start_x": 0, "start_y": 0}
-        self.row_y_map = []
-        self.action_data = {}
-
-    def on_block_scroll(self, event):
-        self.block_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def rebuild_tree_and_render(self):
         self.tree.delete(*self.tree.get_children())
         for i, r in enumerate(self.results_data):
             self.tree.insert("", "end", values=(i+1, self.format_time(r.get('s',0)), self.format_time(r.get('e',0)), r.get('t','')))
         if getattr(self, "notebook", None) and self.notebook.index(self.notebook.select()) == 1:
-            self.render_block_view()
+            self.block_editor.render_block_view()
         self.apply_preview_subtitles(force_reload=True)
 
-    def on_block_right_click(self, event):
-        x, y = self.block_canvas.canvasx(event.x), self.block_canvas.canvasy(event.y)
-        item = self.block_canvas.find_withtag("current")
-        if not item: return
-        tags = self.block_canvas.gettags(item[0])
-        
-        word_tag = next((t for t in tags if "_" in t and not t.startswith("row_") and t not in ["current", "word_block"]), None)
-        if word_tag:
-            try:
-                idx, w_idx = map(int, word_tag.split("_"))
-                self.action_data = {"idx": idx, "w_idx": w_idx}
-                self.block_menu.post(event.x_root, event.y_root)
-            except: pass
-        else:
-            row_tag = next((t for t in tags if str(t).startswith("row_")), None)
-            if row_tag:
-                try:
-                    idx = int(row_tag.split("_")[1])
-                    self.action_data = {"idx": idx}
-                    self.row_menu.post(event.x_root, event.y_root)
-                except: pass
 
-    def split_word_block(self):
-        idx, w_idx = self.action_data.get("idx"), self.action_data.get("w_idx")
-        if idx is None or w_idx is None: return
-        words = self.results_data[idx].get('words', [])
-        if not words or w_idx == 0 or w_idx >= len(words): return
-        
-        new_words = words[w_idx:]
-        self.results_data[idx]['words'] = words[:w_idx]
-        
-        def _update_row(i):
-            w_ls = self.results_data[i]['words']
-            w_ls.sort(key=lambda x: x['s'])
-            self.results_data[i]['t'] = ' '.join(w['word'].strip() for w in w_ls)
-            self.results_data[i]['s'] = w_ls[0]['s']
-            self.results_data[i]['e'] = w_ls[-1]['e']
-            
-        _update_row(idx)
-        new_row = {'words': new_words, 't': '', 's': 0, 'e': 0}
-        self.results_data.insert(idx + 1, new_row)
-        _update_row(idx + 1)
-        
-        self.rebuild_tree_and_render()
-
-    def merge_row_block(self, direction):
-        idx = self.action_data.get("idx")
-        if idx is None: return
-        target_idx = idx + direction
-        if target_idx < 0 or target_idx >= len(self.results_data): return
-        
-        base_idx = min(idx, target_idx)
-        merge_idx = max(idx, target_idx)
-        
-        w1 = self.results_data[base_idx].get('words', [])
-        w2 = self.results_data[merge_idx].get('words', [])
-        
-        if not w1 and self.results_data[base_idx].get('t'):
-            w1 = [{'word': self.results_data[base_idx]['t'], 's': self.results_data[base_idx]['s'], 'e': self.results_data[base_idx]['e']}]
-        if not w2 and self.results_data[merge_idx].get('t'):
-            w2 = [{'word': self.results_data[merge_idx]['t'], 's': self.results_data[merge_idx]['s'], 'e': self.results_data[merge_idx]['e']}]
-            
-        self.results_data[base_idx]['words'] = w1 + w2
-        w_ls = self.results_data[base_idx]['words']
-        if w_ls:
-            w_ls.sort(key=lambda x: x['s'])
-            self.results_data[base_idx]['t'] = ' '.join(w['word'].strip() for w in w_ls)
-            self.results_data[base_idx]['s'] = w_ls[0]['s']
-            self.results_data[base_idx]['e'] = w_ls[-1]['e']
-            
-        self.results_data.pop(merge_idx)
-        self.rebuild_tree_and_render()
-
-    def render_block_view(self):
-        if not hasattr(self, 'block_canvas') or not self.block_canvas.winfo_exists(): return
-        self.block_canvas.delete("all")
-        y_offset = 15
-        self.row_y_map = []
-        
-        for idx, r in enumerate(self.results_data):
-            row_id = self.block_canvas.create_rectangle(10, y_offset, 2500, y_offset + 35, fill="#34495e", outline="", tags=f"row_{idx}")
-            self.block_canvas.tag_lower(row_id)
-            
-            self.block_canvas.create_text(20, y_offset + 17, text=f"[{idx+1}]", fill="#bdc3c7", anchor=tk.W, font=("", 9))
-            
-            start_txt = self.block_canvas.create_text(50, y_offset + 17, text=self.format_time(r.get('s',0)), fill="#3498db", anchor=tk.W, font=("", 9, "underline"))
-            self.block_canvas.tag_bind(start_txt, "<Button-1>", lambda e, s=r.get('s',0): self.player.set_time(int(s * 1000)))
-            
-            self.block_canvas.create_text(100, y_offset + 17, text="-", fill="#ecf0f1", anchor=tk.W, font=("", 9))
-            
-            end_txt = self.block_canvas.create_text(115, y_offset + 17, text=self.format_time(r.get('e',0)), fill="#e74c3c", anchor=tk.W, font=("", 9, "underline"))
-            self.block_canvas.tag_bind(end_txt, "<Button-1>", lambda e, s=r.get('e',0): self.player.set_time(int(s * 1000)))
-            
-            x_offset = 180
-            words = r.get('words', [])
-            
-            # [시니어 데이터 정제] Whisper가 띄어쓰기가 있는 문장을 통째로 하나의 단어 블록으로 뱉어냈을 경우 강제 분해
-            refined_words = []
-            for w_obj in words:
-                sub_txt = w_obj.get('word', '').strip()
-                sub_parts = sub_txt.split()
-                if len(sub_parts) > 1:
-                    sub_dur = (w_obj['e'] - w_obj['s']) / max(1, len(sub_parts))
-                    for i, p in enumerate(sub_parts):
-                        refined_words.append({'word': p, 's': w_obj['s'] + i*sub_dur, 'e': w_obj['s'] + (i+1)*sub_dur})
-                elif sub_txt:
-                    refined_words.append({'word': sub_txt, 's': w_obj['s'], 'e': w_obj['e']})
-            words = refined_words
-            
-            if not words and r.get('t'):
-                s_t, e_t = r['s'], r['e']
-                split_t = r['t'].split()
-                if split_t:
-                    dur = (e_t - s_t) / max(1, len(split_t))
-                    words = [{'word': wt, 's': s_t + i*dur, 'e': s_t + (i+1)*dur} for i, wt in enumerate(split_t)]
-            
-            self.results_data[idx]['words'] = words
-
-            for w_idx, w_obj in enumerate(words):
-                text = w_obj['word']
-                text_id = self.block_canvas.create_text(x_offset + 10, y_offset + 17, text=text, fill="#2c3e50", anchor=tk.W, font=("", 10, "bold"))
-                bbox = self.block_canvas.bbox(text_id)
-                if bbox:
-                    w_width = bbox[2] - bbox[0] + 20
-                    rect_id = self.block_canvas.create_rectangle(x_offset, y_offset + 3, x_offset + w_width, y_offset + 32, fill="#f1c40f", outline="#e67e22", width=2, tags=("word_block", f"{idx}_{w_idx}"))
-                    self.block_canvas.tag_lower(rect_id, text_id)
-                    self.block_canvas.addtag_withtag(f"{idx}_{w_idx}", text_id)
-                    x_offset += w_width + 8
-            
-            self.row_y_map.append({'idx': idx, 'y_start': y_offset, 'y_end': y_offset + 35})
-            y_offset += 45
-            
-        self.block_canvas.configure(scrollregion=(0, 0, 2500, y_offset + 20))
-
-    def on_block_press(self, event):
-        x, y = self.block_canvas.canvasx(event.x), self.block_canvas.canvasy(event.y)
-        item = self.block_canvas.find_withtag("current")
-        if not item: return
-        tags = self.block_canvas.gettags(item[0])
-        word_tag = next((t for t in tags if "_" in t and t not in ["current", "word_block"] and not t.startswith("row_")), None)
-        if not word_tag: return
-        
-        try:
-            idx_str, w_idx_str = word_tag.split("_")
-            self.drag_data["idx"] = int(idx_str)
-            self.drag_data["w_idx"] = int(w_idx_str)
-            self.drag_data["start_x"] = x
-            self.drag_data["start_y"] = y
-            
-            items = self.block_canvas.find_withtag(word_tag)
-            self.drag_data["items"] = items
-            for it in items:
-                self.block_canvas.tag_raise(it)
-        except: pass
-
-    def on_block_drag(self, event):
-        if not getattr(self, 'drag_data', {}).get("items"): return
-        x, y = self.block_canvas.canvasx(event.x), self.block_canvas.canvasy(event.y)
-        dx = x - self.drag_data["start_x"]
-        dy = y - self.drag_data["start_y"]
-        for it in self.drag_data["items"]:
-            self.block_canvas.move(it, dx, dy)
-        self.drag_data["start_x"] = x
-        self.drag_data["start_y"] = y
-
-    def on_block_release(self, event):
-        if not getattr(self, 'drag_data', {}).get("items"): return
-        y = self.block_canvas.canvasy(event.y)
-        target_idx = None
-        for rmap in self.row_y_map:
-            # Drop forgiveness range (+/- 10px)
-            if rmap['y_start'] - 10 <= y <= rmap['y_end'] + 10:
-                target_idx = rmap['idx']
-                break
-                
-        if target_idx is not None:
-            s_idx = self.drag_data["idx"]
-            w_idx = self.drag_data["w_idx"]
-            
-            w_obj = self.results_data[s_idx]['words'].pop(w_idx)
-            if 'words' not in self.results_data[target_idx]:
-                 self.results_data[target_idx]['words'] = []
-                 
-            self.results_data[target_idx]['words'].append(w_obj)
-            
-            for u in set([s_idx, target_idx]):
-                w_ls = self.results_data[u]['words']
-                target_item = self.tree.get_children()[u]
-                if w_ls:
-                    w_ls.sort(key=lambda x: x['s'])
-                    new_t = ' '.join(w['word'].strip() for w in w_ls)
-                    self.results_data[u]['t'] = new_t
-                    self.results_data[u]['s'] = w_ls[0]['s']
-                    self.results_data[u]['e'] = w_ls[-1]['e']
-                    self.tree.set(target_item, column='#2', value=self.format_time(w_ls[0]['s']))
-                    self.tree.set(target_item, column='#3', value=self.format_time(w_ls[-1]['e']))
-                    self.tree.set(target_item, column='#4', value=new_t)
-                else:
-                    self.results_data[u]['t'] = ""
-                    self.tree.set(target_item, column='#4', value="")
-
-            self.apply_preview_subtitles(force_reload=True)
-        
-        self.drag_data = {"items": []}
-        self.render_block_view()
-        
-    def on_block_double(self, event):
-        y = self.block_canvas.canvasy(event.y)
-        for rmap in self.row_y_map:
-            if rmap['y_start'] <= y <= rmap['y_end']:
-                r = self.results_data[rmap['idx']]
-                self.player.set_time(int(r.get('s', 0) * 1000))
-                break
-    # ==============================================================================
 
     def _open_editor(self, item, x, y, w, h, click_x=None):
         val = self.tree.item(item)['values']
