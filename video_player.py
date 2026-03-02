@@ -76,6 +76,13 @@ class VideoPlayer:
 
     def toggle_play(self):
         if not self.vlc_available: return False
+        
+        # [시니어 최적화] 영상이 끝까지 가서 (Ended) 멈춘 상태라면 리셋(Stop) 후 처음부터 다시 재생
+        if self.player.get_state() == vlc.State.Ended:
+            self.player.stop()
+            self.player.play()
+            return True
+            
         if self.player.is_playing():
             self.player.set_pause(1)
         else:
@@ -84,6 +91,8 @@ class VideoPlayer:
 
     def play(self):
         if self.vlc_available:
+            if self.player.get_state() == vlc.State.Ended:
+                self.player.stop()
             self.player.play()
 
     def pause(self):
@@ -103,6 +112,13 @@ class VideoPlayer:
 
     def set_time(self, ms):
         if self.vlc_available:
+            # [시니어 최적화] 영상이 재생 종료(Ended) 상태에 도달했을 때, 타임라인을 눌러서 시간을 돌려도
+            # VLC 엔진이 시간을 먹지 않고 무시하는 현상(블로킹)을 방지하기 위해 강제 리셋 후 시간 워프
+            if self.player.get_state() == vlc.State.Ended:
+                self.player.stop()
+                self.player.play()
+                self.player.set_pause(1) # 일단 정지상태 유지
+            
             self.player.set_time(int(ms))
 
     def get_time(self):
@@ -124,6 +140,12 @@ class VideoPlayer:
 
     def skip(self, ms):
         if self.vlc_available:
+            # [시니어 최적화] 영상이 끝났을 경우 방향키로 앞뒤 탐색 시 무시되는 현상 방지
+            if self.player.get_state() == vlc.State.Ended:
+                self.player.stop()
+                self.player.play()
+                self.player.set_pause(1)
+                
             new_time = max(0, self.player.get_time() + ms)
             self.player.set_time(new_time)
 

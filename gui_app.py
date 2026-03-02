@@ -87,13 +87,37 @@ class CustomModelApp:
         self.lbl_status = tk.Label(right_f, text="준비됨", fg="#27ae60", font=("bold", 10)); self.lbl_status.pack(fill=tk.X, pady=5)
         self.progress_var = tk.DoubleVar(); ttk.Progressbar(right_f, variable=self.progress_var).pack(fill=tk.X, pady=5)
         list_f = tk.Frame(right_f); list_f.pack(fill=tk.BOTH, expand=True, pady=10)
-        self.tree = ttk.Treeview(list_f, columns=("no", "start", "end", "text"), show="headings"); self.tree.heading("no", text="No"); self.tree.heading("start", text="시작"); self.tree.heading("end", text="종료"); self.tree.heading("text", text="내용/길이"); self.tree.column("no", width=40, anchor=tk.CENTER); self.tree.column("start", width=80, anchor=tk.CENTER); self.tree.column("end", width=80, anchor=tk.CENTER); self.tree.column("text", width=250); sc = ttk.Scrollbar(list_f, orient=tk.VERTICAL, command=self.tree.yview); self.tree.configure(yscrollcommand=sc.set); self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); sc.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # [시니어 최적화] 리스트 뷰와 드래그&드롭 블록 뷰를 전환할 수 있는 노트북(탭) 시스템
+        self.notebook = ttk.Notebook(list_f)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
+        self.tab_tree = tk.Frame(self.notebook)
+        self.notebook.add(self.tab_tree, text="기본 리스트 뷰")
+        self.tab_canvas = tk.Frame(self.notebook)
+        self.notebook.add(self.tab_canvas, text="[실험] 단어 블록 마법진 (Drag & Drop)")
+
+        self.tree = ttk.Treeview(self.tab_tree, columns=("no", "start", "end", "text"), show="headings"); self.tree.heading("no", text="No"); self.tree.heading("start", text="시작"); self.tree.heading("end", text="종료"); self.tree.heading("text", text="내용/길이"); self.tree.column("no", width=40, anchor=tk.CENTER); self.tree.column("start", width=80, anchor=tk.CENTER); self.tree.column("end", width=80, anchor=tk.CENTER); self.tree.column("text", width=250); sc = ttk.Scrollbar(self.tab_tree, orient=tk.VERTICAL, command=self.tree.yview); self.tree.configure(yscrollcommand=sc.set); self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); sc.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.init_block_view(self.tab_canvas)
+        def _on_tab_changed(e):
+            idx = self.notebook.index(self.notebook.select())
+            if idx == 1:
+                self.render_block_view()
+                # [시니어 최적화] 리스트 스크롤 비율을 캔버스로 복사
+                self.block_canvas.yview_moveto(self.tree.yview()[0])
+            elif idx == 0:
+                # [시니어 최적화] 캔버스 스크롤 비율을 리스트로 복사
+                self.tree.yview_moveto(self.block_canvas.yview()[0])
+        self.notebook.bind("<<NotebookTabChanged>>", _on_tab_changed)
         
         # 우클릭 메뉴 및 이벤트 바인딩 복구
         self.menu = tk.Menu(self.root, tearoff=0)
         self.menu.add_command(label="시작 지점으로 이동", command=self.jump_to_start)
         self.menu.add_command(label="종료 지점으로 이동", command=self.jump_to_end)
-        self.tree.bind("<Button-1>", self.on_tree_click)
+        self.menu.add_separator()
+        self.menu.add_command(label="대사 수정하기", command=self.edit_selected_text)
+        
+        self.tree.bind("<ButtonRelease-1>", self.on_tree_click)
         self.tree.bind("<Button-3>", self.show_context_menu)
         opt = tk.LabelFrame(right_f, text=" 상세 설정 ", padx=10, pady=10); opt.pack(fill=tk.X, pady=5)
         
@@ -155,6 +179,18 @@ class CustomModelApp:
         ttk.Combobox(lf, textvariable=self.export_format, values=["SRT", "VTT", "TXT", "CSV"], state="readonly", width=6).pack(side=tk.RIGHT, padx=5)
 
     def bind_keys(self): self.root.bind("<space>", lambda e: self.toggle_play()); self.root.bind("<Left>", lambda e: self.skip_time(-5000)); self.root.bind("<Right>", lambda e: self.skip_time(5000))
+    def format_time(self, t_sec):
+        m = int(t_sec // 60)
+        s = t_sec % 60
+        return f"{m:02d}:{s:05.2f}"
+    
+    def parse_time(self, t_str):
+        if ":" in str(t_str):
+            parts = str(t_str).split(":")
+            if len(parts) == 2:
+                return int(parts[0]) * 60 + float(parts[1])
+        return float(str(t_str).replace("s", ""))
+
     def process_ui_queue(self):
         try:
             while True:
@@ -164,7 +200,7 @@ class CustomModelApp:
                 if self.stop_event.is_set(): continue
                 
                 if task["action"] == "progress": self.progress_var.set(task["value"]); self.lbl_status.config(text=task["text"])
-                elif task["action"] == "add_row": self.tree.insert("", "end", values=(task["i"], f"{round(task['s'], 2)}s", f"{round(task['e'], 2)}s", task['t']))
+                elif task["action"] == "add_row": self.tree.insert("", "end", values=(task["i"], self.format_time(task['s']), self.format_time(task['e']), task['t']))
                 elif task["action"] == "complete":
                     self.lbl_status.config(text=task["text"], fg="#27ae60"); self.progress_var.set(100)
                     self.btn_analyze.config(state=tk.NORMAL) # [시니어 수정] 분석 버튼은 항상 살려둠
@@ -430,31 +466,378 @@ class CustomModelApp:
         item = self.tree.identify_row(e.y); col = self.tree.identify_column(e.x)
         if item:
             val = self.tree.item(item)['values']
+            if col == '#4':
+                bbox = self.tree.bbox(item, '#4')
+                if bbox:
+                    x, y, w, h = bbox
+                    self._open_editor(item, x, y, max(w, 200), max(h, 20), e.x - x)
+            else:
+                try:
+                    # 시작 시간 클릭(#2) vs 종료 시간 클릭(#3) 분기 처리
+                    if col == '#3': t_sec = self.parse_time(val[2])
+                    else: t_sec = self.parse_time(val[1])
+                    self.player.set_time(int(t_sec * 1000))
+                except: pass
+            
+    def edit_selected_text(self):
+        sel = self.tree.selection()
+        if not sel: return
+        item = sel[0]
+        bbox = self.tree.bbox(item, '#4')
+        if bbox:
+            x, y, w, h = bbox
+            self._open_editor(item, x, y, max(w, 200), max(h, 20))
+
+    # ================= [시니어 시스템: 물리적 블록 마법진 (Drag & Drop)] =================
+    def init_block_view(self, parent):
+        self.block_canvas = tk.Canvas(parent, bg="#2c3e50", highlightthickness=0)
+        self.block_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sc = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=self.block_canvas.yview)
+        sc.pack(side=tk.RIGHT, fill=tk.Y)
+        self.block_canvas.configure(yscrollcommand=sc.set)
+
+        self.block_canvas.bind("<ButtonPress-1>", self.on_block_press)
+        self.block_canvas.bind("<B1-Motion>", self.on_block_drag)
+        self.block_canvas.bind("<ButtonRelease-1>", self.on_block_release)
+        self.block_canvas.bind("<Double-1>", self.on_block_double)
+        
+        # [시니어 최적화] 탭2 캔버스 휠 스크롤 연동
+        self.tab_canvas.bind("<Enter>", lambda e: self.block_canvas.bind_all("<MouseWheel>", self.on_block_scroll))
+        self.tab_canvas.bind("<Leave>", lambda e: self.block_canvas.unbind_all("<MouseWheel>"))
+        self.block_canvas.bind("<Button-3>", self.on_block_right_click)
+
+        # [시니어 최적화] 분리/병합 우클릭 메뉴
+        self.block_menu = tk.Menu(self.root, tearoff=0)
+        self.block_menu.add_command(label="[분리] 현재 단어부터 다음 줄로 나누기", command=self.split_word_block)
+        
+        self.row_menu = tk.Menu(self.root, tearoff=0)
+        self.row_menu.add_command(label="[병합] 위 대사와 합치기", command=lambda: self.merge_row_block(-1))
+        self.row_menu.add_command(label="[병합] 아래 대사와 합치기", command=lambda: self.merge_row_block(1))
+
+        self.drag_data = {"items": [], "idx": -1, "w_idx": -1, "start_x": 0, "start_y": 0}
+        self.row_y_map = []
+        self.action_data = {}
+
+    def on_block_scroll(self, event):
+        self.block_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def rebuild_tree_and_render(self):
+        self.tree.delete(*self.tree.get_children())
+        for i, r in enumerate(self.results_data):
+            self.tree.insert("", "end", values=(i+1, self.format_time(r.get('s',0)), self.format_time(r.get('e',0)), r.get('t','')))
+        if getattr(self, "notebook", None) and self.notebook.index(self.notebook.select()) == 1:
+            self.render_block_view()
+        self.apply_preview_subtitles(force_reload=True)
+
+    def on_block_right_click(self, event):
+        x, y = self.block_canvas.canvasx(event.x), self.block_canvas.canvasy(event.y)
+        item = self.block_canvas.find_withtag("current")
+        if not item: return
+        tags = self.block_canvas.gettags(item[0])
+        
+        word_tag = next((t for t in tags if "_" in t and not t.startswith("row_") and t not in ["current", "word_block"]), None)
+        if word_tag:
             try:
-                # 시작 시간 클릭(#2) vs 종료 시간 클릭(#3) 분기 처리
-                if col == '#3': t_sec = float(str(val[2]).replace('s',''))
-                else: t_sec = float(str(val[1]).replace('s',''))
-                self.player.set_time(int(t_sec * 1000))
+                idx, w_idx = map(int, word_tag.split("_"))
+                self.action_data = {"idx": idx, "w_idx": w_idx}
+                self.block_menu.post(event.x_root, event.y_root)
             except: pass
+        else:
+            row_tag = next((t for t in tags if str(t).startswith("row_")), None)
+            if row_tag:
+                try:
+                    idx = int(row_tag.split("_")[1])
+                    self.action_data = {"idx": idx}
+                    self.row_menu.post(event.x_root, event.y_root)
+                except: pass
+
+    def split_word_block(self):
+        idx, w_idx = self.action_data.get("idx"), self.action_data.get("w_idx")
+        if idx is None or w_idx is None: return
+        words = self.results_data[idx].get('words', [])
+        if not words or w_idx == 0 or w_idx >= len(words): return
+        
+        new_words = words[w_idx:]
+        self.results_data[idx]['words'] = words[:w_idx]
+        
+        def _update_row(i):
+            w_ls = self.results_data[i]['words']
+            w_ls.sort(key=lambda x: x['s'])
+            self.results_data[i]['t'] = ' '.join(w['word'].strip() for w in w_ls)
+            self.results_data[i]['s'] = w_ls[0]['s']
+            self.results_data[i]['e'] = w_ls[-1]['e']
+            
+        _update_row(idx)
+        new_row = {'words': new_words, 't': '', 's': 0, 'e': 0}
+        self.results_data.insert(idx + 1, new_row)
+        _update_row(idx + 1)
+        
+        self.rebuild_tree_and_render()
+
+    def merge_row_block(self, direction):
+        idx = self.action_data.get("idx")
+        if idx is None: return
+        target_idx = idx + direction
+        if target_idx < 0 or target_idx >= len(self.results_data): return
+        
+        base_idx = min(idx, target_idx)
+        merge_idx = max(idx, target_idx)
+        
+        w1 = self.results_data[base_idx].get('words', [])
+        w2 = self.results_data[merge_idx].get('words', [])
+        
+        if not w1 and self.results_data[base_idx].get('t'):
+            w1 = [{'word': self.results_data[base_idx]['t'], 's': self.results_data[base_idx]['s'], 'e': self.results_data[base_idx]['e']}]
+        if not w2 and self.results_data[merge_idx].get('t'):
+            w2 = [{'word': self.results_data[merge_idx]['t'], 's': self.results_data[merge_idx]['s'], 'e': self.results_data[merge_idx]['e']}]
+            
+        self.results_data[base_idx]['words'] = w1 + w2
+        w_ls = self.results_data[base_idx]['words']
+        if w_ls:
+            w_ls.sort(key=lambda x: x['s'])
+            self.results_data[base_idx]['t'] = ' '.join(w['word'].strip() for w in w_ls)
+            self.results_data[base_idx]['s'] = w_ls[0]['s']
+            self.results_data[base_idx]['e'] = w_ls[-1]['e']
+            
+        self.results_data.pop(merge_idx)
+        self.rebuild_tree_and_render()
+
+    def render_block_view(self):
+        if not hasattr(self, 'block_canvas') or not self.block_canvas.winfo_exists(): return
+        self.block_canvas.delete("all")
+        y_offset = 15
+        self.row_y_map = []
+        
+        for idx, r in enumerate(self.results_data):
+            row_id = self.block_canvas.create_rectangle(10, y_offset, 2500, y_offset + 35, fill="#34495e", outline="", tags=f"row_{idx}")
+            self.block_canvas.tag_lower(row_id)
+            
+            self.block_canvas.create_text(20, y_offset + 17, text=f"[{idx+1}]", fill="#bdc3c7", anchor=tk.W, font=("", 9))
+            
+            start_txt = self.block_canvas.create_text(50, y_offset + 17, text=self.format_time(r.get('s',0)), fill="#3498db", anchor=tk.W, font=("", 9, "underline"))
+            self.block_canvas.tag_bind(start_txt, "<Button-1>", lambda e, s=r.get('s',0): self.player.set_time(int(s * 1000)))
+            
+            self.block_canvas.create_text(100, y_offset + 17, text="-", fill="#ecf0f1", anchor=tk.W, font=("", 9))
+            
+            end_txt = self.block_canvas.create_text(115, y_offset + 17, text=self.format_time(r.get('e',0)), fill="#e74c3c", anchor=tk.W, font=("", 9, "underline"))
+            self.block_canvas.tag_bind(end_txt, "<Button-1>", lambda e, s=r.get('e',0): self.player.set_time(int(s * 1000)))
+            
+            x_offset = 180
+            words = r.get('words', [])
+            
+            # [시니어 데이터 정제] Whisper가 띄어쓰기가 있는 문장을 통째로 하나의 단어 블록으로 뱉어냈을 경우 강제 분해
+            refined_words = []
+            for w_obj in words:
+                sub_txt = w_obj.get('word', '').strip()
+                sub_parts = sub_txt.split()
+                if len(sub_parts) > 1:
+                    sub_dur = (w_obj['e'] - w_obj['s']) / max(1, len(sub_parts))
+                    for i, p in enumerate(sub_parts):
+                        refined_words.append({'word': p, 's': w_obj['s'] + i*sub_dur, 'e': w_obj['s'] + (i+1)*sub_dur})
+                elif sub_txt:
+                    refined_words.append({'word': sub_txt, 's': w_obj['s'], 'e': w_obj['e']})
+            words = refined_words
+            
+            if not words and r.get('t'):
+                s_t, e_t = r['s'], r['e']
+                split_t = r['t'].split()
+                if split_t:
+                    dur = (e_t - s_t) / max(1, len(split_t))
+                    words = [{'word': wt, 's': s_t + i*dur, 'e': s_t + (i+1)*dur} for i, wt in enumerate(split_t)]
+            
+            self.results_data[idx]['words'] = words
+
+            for w_idx, w_obj in enumerate(words):
+                text = w_obj['word']
+                text_id = self.block_canvas.create_text(x_offset + 10, y_offset + 17, text=text, fill="#2c3e50", anchor=tk.W, font=("", 10, "bold"))
+                bbox = self.block_canvas.bbox(text_id)
+                if bbox:
+                    w_width = bbox[2] - bbox[0] + 20
+                    rect_id = self.block_canvas.create_rectangle(x_offset, y_offset + 3, x_offset + w_width, y_offset + 32, fill="#f1c40f", outline="#e67e22", width=2, tags=("word_block", f"{idx}_{w_idx}"))
+                    self.block_canvas.tag_lower(rect_id, text_id)
+                    self.block_canvas.addtag_withtag(f"{idx}_{w_idx}", text_id)
+                    x_offset += w_width + 8
+            
+            self.row_y_map.append({'idx': idx, 'y_start': y_offset, 'y_end': y_offset + 35})
+            y_offset += 45
+            
+        self.block_canvas.configure(scrollregion=(0, 0, 2500, y_offset + 20))
+
+    def on_block_press(self, event):
+        x, y = self.block_canvas.canvasx(event.x), self.block_canvas.canvasy(event.y)
+        item = self.block_canvas.find_withtag("current")
+        if not item: return
+        tags = self.block_canvas.gettags(item[0])
+        word_tag = next((t for t in tags if "_" in t and t not in ["current", "word_block"] and not t.startswith("row_")), None)
+        if not word_tag: return
+        
+        try:
+            idx_str, w_idx_str = word_tag.split("_")
+            self.drag_data["idx"] = int(idx_str)
+            self.drag_data["w_idx"] = int(w_idx_str)
+            self.drag_data["start_x"] = x
+            self.drag_data["start_y"] = y
+            
+            items = self.block_canvas.find_withtag(word_tag)
+            self.drag_data["items"] = items
+            for it in items:
+                self.block_canvas.tag_raise(it)
+        except: pass
+
+    def on_block_drag(self, event):
+        if not getattr(self, 'drag_data', {}).get("items"): return
+        x, y = self.block_canvas.canvasx(event.x), self.block_canvas.canvasy(event.y)
+        dx = x - self.drag_data["start_x"]
+        dy = y - self.drag_data["start_y"]
+        for it in self.drag_data["items"]:
+            self.block_canvas.move(it, dx, dy)
+        self.drag_data["start_x"] = x
+        self.drag_data["start_y"] = y
+
+    def on_block_release(self, event):
+        if not getattr(self, 'drag_data', {}).get("items"): return
+        y = self.block_canvas.canvasy(event.y)
+        target_idx = None
+        for rmap in self.row_y_map:
+            # Drop forgiveness range (+/- 10px)
+            if rmap['y_start'] - 10 <= y <= rmap['y_end'] + 10:
+                target_idx = rmap['idx']
+                break
+                
+        if target_idx is not None:
+            s_idx = self.drag_data["idx"]
+            w_idx = self.drag_data["w_idx"]
+            
+            w_obj = self.results_data[s_idx]['words'].pop(w_idx)
+            if 'words' not in self.results_data[target_idx]:
+                 self.results_data[target_idx]['words'] = []
+                 
+            self.results_data[target_idx]['words'].append(w_obj)
+            
+            for u in set([s_idx, target_idx]):
+                w_ls = self.results_data[u]['words']
+                target_item = self.tree.get_children()[u]
+                if w_ls:
+                    w_ls.sort(key=lambda x: x['s'])
+                    new_t = ' '.join(w['word'].strip() for w in w_ls)
+                    self.results_data[u]['t'] = new_t
+                    self.results_data[u]['s'] = w_ls[0]['s']
+                    self.results_data[u]['e'] = w_ls[-1]['e']
+                    self.tree.set(target_item, column='#2', value=self.format_time(w_ls[0]['s']))
+                    self.tree.set(target_item, column='#3', value=self.format_time(w_ls[-1]['e']))
+                    self.tree.set(target_item, column='#4', value=new_t)
+                else:
+                    self.results_data[u]['t'] = ""
+                    self.tree.set(target_item, column='#4', value="")
+
+            self.apply_preview_subtitles(force_reload=True)
+        
+        self.drag_data = {"items": []}
+        self.render_block_view()
+        
+    def on_block_double(self, event):
+        y = self.block_canvas.canvasy(event.y)
+        for rmap in self.row_y_map:
+            if rmap['y_start'] <= y <= rmap['y_end']:
+                r = self.results_data[rmap['idx']]
+                self.player.set_time(int(r.get('s', 0) * 1000))
+                break
+    # ==============================================================================
+
+    def _open_editor(self, item, x, y, w, h, click_x=None):
+        val = self.tree.item(item)['values']
+        text = str(val[3] if len(val) > 3 else "")
+        entry = tk.Entry(self.tree)
+        entry.place(x=x, y=y, width=w, height=h)
+        entry.insert(0, text)
+        entry.focus()
+
+        # [시니어 최적화] 사용자가 클릭한 x 좌표를 계산하여 해당 글자 사이에 커서 파킹
+        if click_x is not None:
+            def _set_cursor():
+                idx = entry.index(f"@{max(0, click_x)}")
+                entry.icursor(idx)
+            self.root.after(10, _set_cursor)
+        else:
+            entry.selection_range(0, tk.END)
+
+        # [시니어 모션 트래킹] 스크롤 시 텍스트 입력창이 원본 셀 위치를 실시간으로 따라가도록 추적
+        def _track_position():
+            if not entry.winfo_exists(): return
+            bbox = self.tree.bbox(item, '#4')
+            if bbox:
+                nx, ny, nw, nh = bbox
+                entry.place(x=nx, y=ny, width=max(nw, 200), height=max(nh, 20))
+            else:
+                entry.place(x=-9999, y=-9999) # 화면 밖으로 스크롤 시 임시 숨김 처리
+            self.root.after(15, _track_position)
+        
+        _track_position()
+
+        # [시니어 최적화] 실시간 타이핑 반영 (Debounced)
+        def _on_key_release(event):
+            if event.keysym in ['Return', 'Escape']: return
+            if hasattr(self, '_edit_debounce_timer') and self._edit_debounce_timer:
+                self.root.after_cancel(self._edit_debounce_timer)
+            self._edit_debounce_timer = self.root.after(300, save_edit_live)
+
+        def save_edit_live():
+            if not entry.winfo_exists(): return
+            new_text = entry.get()
+            self.tree.set(item, column='#4', value=new_text)
+            try:
+                idx = int(self.tree.item(item)['values'][0]) - 1
+                if 0 <= idx < len(self.results_data):
+                    self.results_data[idx]['t'] = new_text
+                    # [시니어 최적화] 텍스트 수정 발생 시 기존 단어 블록(배열) 파쇄를 통해 탭2 진입 시 자동 분할 재계산 유도
+                    self.results_data[idx].pop('words', None)
+                    self.apply_preview_subtitles(force_reload=True)
+            except: pass
+
+        entry.bind('<KeyRelease>', _on_key_release)
+
+        def save_edit(event=None):
+            if hasattr(self, '_edit_debounce_timer') and self._edit_debounce_timer:
+                self.root.after_cancel(self._edit_debounce_timer)
+            save_edit_live()
+            try: entry.destroy()
+            except: pass
+
+        entry.bind('<Return>', save_edit)
+        entry.bind('<FocusOut>', save_edit)
+        entry.bind('<Escape>', lambda ev: entry.destroy())
+
     def jump_to_start(self):
         sel = self.tree.selection()
-        if sel: self.player.set_time(int(float(str(self.tree.item(sel)['values'][1]).replace('s','')) * 1000))
+        if sel: self.player.set_time(int(float(str(self.tree.item(sel[0])['values'][1]).replace('s','')) * 1000))
     def jump_to_end(self):
         sel = self.tree.selection()
-        if sel: self.player.set_time(int(float(str(self.tree.item(sel)['values'][2]).replace('s','')) * 1000))
+        if sel: self.player.set_time(int(float(str(self.tree.item(sel[0])['values'][2]).replace('s','')) * 1000))
     def show_context_menu(self, e):
         item = self.tree.identify_row(e.y)
         if item: self.tree.selection_set(item); self.menu.post(e.x_root, e.y_root)
-    def apply_preview_subtitles(self):
+    def apply_preview_subtitles(self, force_reload=False):
         if not self.results_data or not self.player: return
         try:
-            with open("temp_preview.srt", "w", encoding="utf-8") as f:
+            # [시니어 최적화] VLC 경로 캐싱 무효화를 위한 A/B 핑퐁 시스템 적용 (파일명이 같으면 VLC가 로드하지 않음)
+            suffix = "A" if getattr(self, "_ping_pong", False) else "B"
+            self._ping_pong = not getattr(self, "_ping_pong", False)
+            srt_name = os.path.abspath(f"temp_preview_{suffix}.srt")
+            
+            with open(srt_name, "w", encoding="utf-8") as f:
                 for i, r in enumerate(self.results_data):
                     s_r, e_r = r['s'], r['e']
                     # [시니어 최적화] 다음 자막과 시간이 겹치거나 맞닿으면 0.05초(50ms) 갭을 추가하여 자막 분리 깜박임 구현
                     if i < len(self.results_data) - 1 and e_r >= self.results_data[i+1]['s']: e_r = max(s_r + 0.1, self.results_data[i+1]['s'] - 0.05)
                     s = time.strftime('%H:%M:%S', time.gmtime(s_r)) + f",{int((s_r%1)*1000):03d}"; e = time.strftime('%H:%M:%S', time.gmtime(e_r)) + f",{int((e_r%1)*1000):03d}"; f.write(f"{i+1}\n{s} --> {e}\n{r['t']}\n\n")
-            self.player.set_subtitle(os.path.abspath("temp_preview.srt"))
+            
+            self.player.set_subtitle(srt_name)
+            
+            # [시니어 최적화] 실시간 타이핑 시 VLC가 일시정지 상태라면, 강제로 현재 시간에 다시 제자리 점프하여 프레임을 새로고침
+            if force_reload and not self.player.is_playing():
+                curr = self.player.get_time()
+                if curr >= 0:
+                    self.player.set_time(curr)
         except: pass
     def toggle_play(self):
         if self.player: is_p = self.player.toggle_play(); self.btn_play.config(text=self.ICON_PAUSE if is_p else self.ICON_PLAY)

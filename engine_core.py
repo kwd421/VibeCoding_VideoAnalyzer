@@ -50,7 +50,11 @@ class HyperTranscriptionEngine:
             ct2_dev = "cuda" if best_device == "cuda" else "cpu"
             c_type = "float16" if ct2_dev == "cuda" else "int8"
             
-            self.fw_model = WhisperModel(self.model_id, device=ct2_dev, compute_type=c_type, cpu_threads=self.cpu_cores, num_workers=2)
+            # [시니어 최적화] Multi-worker 환경에서 Thread 뻥튀기를 방지하기 위해 Total Thread 제한
+            workers = 2 if ct2_dev == "cpu" else 1
+            threads_per_worker = max(1, self.cpu_cores // workers)
+            
+            self.fw_model = WhisperModel(self.model_id, device=ct2_dev, compute_type=c_type, cpu_threads=threads_per_worker, num_workers=workers)
         return self.fw_model
 
     def set_model_id(self, new_model_id):
@@ -338,26 +342,28 @@ class HyperTranscriptionEngine:
                                         w_e = seg_e 
                                         
                                     if w_s - last_e > split_gap_sec:
-                                        t = "".join(curr_words).strip()
-                                        if t and last_e > curr_s: extracted.append({'s': offset_vad + curr_s, 'e': offset_vad + last_e, 't': t})
-                                        curr_words, curr_s = [w.word], w_s
+                                        t = "".join(w['word'] for w in curr_words).strip()
+                                        if t and last_e > curr_s: extracted.append({'s': offset_vad + curr_s, 'e': offset_vad + last_e, 't': t, 'words': curr_words})
+                                        curr_words, curr_s = [{'word': w.word, 's': offset_vad + w_s, 'e': offset_vad + w_e}], w_s
                                     else:
-                                        curr_words.append(w.word)
+                                        curr_words.append({'word': w.word, 's': offset_vad + w_s, 'e': offset_vad + w_e})
                                     last_e = w_e
                                     
-                                t = "".join(curr_words).strip()
-                                if t and last_e > curr_s: extracted.append({'s': offset_vad + curr_s, 'e': offset_vad + last_e, 't': t})
+                                t = "".join(w['word'] for w in curr_words).strip()
+                                if t and last_e > curr_s: extracted.append({'s': offset_vad + curr_s, 'e': offset_vad + last_e, 't': t, 'words': curr_words})
                                 
                                 for ex in extracted: extracted_results.append(ex)
                             else:
                                 c_s, c_e = min(seg_s, sub_max_time), min(seg_e, sub_max_time)
-                                if c_e > c_s: extracted_results.append({'s': offset_vad + c_s, 'e': min(offset_vad + c_e, total_dur), 't': text})
+                                if c_e > c_s: extracted_results.append({'s': offset_vad + c_s, 'e': min(offset_vad + c_e, total_dur), 't': text, 'words': [{'word': text, 's': offset_vad + c_s, 'e': min(offset_vad + c_e, total_dur)}]})
                                 
                         return extracted_results
 
                     raw_results = []
                     # [시니어 최적화] 블로킹 없는 ThreadPoolExecutor 셧다운 도입
-                    executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+                    # ThreadPoolExecutor와 Whisper의 worker 수를 1:1 매칭 (오버헤드 방지)
+                    active_workers = 2 if self._detect_best_device(device_mode) == "cpu" else 1
+                    executor = concurrent.futures.ThreadPoolExecutor(max_workers=active_workers)
                     try:
                         # map 대신 submit을 사용하여 개별 퓨처 제어
                         futures = [executor.submit(_process_ts, bounds) for bounds in safe_tss]
@@ -411,9 +417,11 @@ class HyperTranscriptionEngine:
                                     # 재생성 결과가 정상적이면 기존 값을 덮어쓰고 살려냄
                                     if len(regen_clean) > 0 and (len(set(regen_clean)) / len(regen_clean) > 0.4):
                                         r['t'] = regen_t
+                                        r['words'] = [{'word': regen_t, 's': r['s'], 'e': r['e']}]
                                         yield r
                                 continue # 재생성도 실패하거나 못 살리면 최종적으로 버림 (Drop)
                         
+                        if 'words' not in r: r['words'] = [{'word': r['t'], 's': r['s'], 'e': r['e']}]
                         yield r
                 
                 gc.collect()
