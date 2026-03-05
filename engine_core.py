@@ -185,12 +185,20 @@ class HyperTranscriptionEngine:
                         
                         # [시니어 튜닝] Whisper 내부 VAD와 단어 단위 정밀 타임스탬프를 병행하여 숨소리/공백 싱크 밀림 원천 차단
                         transcribe_kwargs = dict(
-                            beam_size=beam_size, 
-                            language=selected_lang, 
+                            beam_size=beam_size,
+                            language=selected_lang,
                             vad_filter=use_whisper_vad,
                             vad_parameters=dict(min_silence_duration_ms=500, threshold=0.5) if use_whisper_vad else None,
-                            condition_on_previous_text=False, 
-                            temperature=0.0,
+                            condition_on_previous_text=False,
+                            # [발음 정확도] temperature=0.0 단일값 대신 fallback 리스트 사용
+                            # 첫 시도(0.0)에서 확신도 낮으면 0.2→0.4 순서로 자동 재시도 (Whisper 공식 방식)
+                            temperature=[0.0, 0.2, 0.4],
+                            # [발음 정확도] 반복 패널티: 같은 발음을 우물쭈물 반복하는 오인식 억제
+                            repetition_penalty=1.1,
+                            # [발음 정확도] 무음 판정 임계값을 낮춰 작은 목소리/짧은 발화도 포착
+                            no_speech_threshold=0.45,
+                            # [발음 정확도] 반복성 텍스트 조기 감지 기준 강화
+                            compression_ratio_threshold=2.2,
                             word_timestamps=use_word_timestamps
                         )
                             

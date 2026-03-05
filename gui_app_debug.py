@@ -413,7 +413,7 @@ class CustomModelApp:
                     idx = int(self.tree.item(item)['values'][0]) - 1
                     if 0 <= idx < len(self.results_data):
                         # 휠 방향 반전: 위로(delta>0) 올리면 시간 감소(-), 아래로(delta<0) 내리면 시간 증가(+)
-                        delta = -0.05 if e.delta > 0 else 0.05
+                        delta = -0.1 if e.delta > 0 else 0.1
                         key = 's' if col == '#2' else 'e'
                         nv = max(0, self.results_data[idx][key] + delta)
                         
@@ -430,7 +430,7 @@ class CustomModelApp:
                             self.player.set_time(int(nv * 1000))
                             self.player.play()
                             self.apply_preview_subtitles(force_reload=True)
-                except Exception as e: print(f'[WARN] Ctrl+휠 시간 조절 오류: {e}')
+                except: pass
             return 'break' # Ctrl 눌린 상태에선 조절 성공 여부와 무관하게 스크롤 방지
         self.tree.bind('<MouseWheel>', _on_ctrl_wheel)
 
@@ -662,7 +662,7 @@ class CustomModelApp:
                     if col == '#3': t_sec = self.parse_time(val[2])
                     else: t_sec = self.parse_time(val[1])
                     self.player.set_time(int(t_sec * 1000))
-                except Exception as e: print(f'[WARN] 트리 클릭 시간 이동 오류: {e}')
+                except: pass
             
     def edit_selected_text(self):
         sel = self.tree.selection()
@@ -732,7 +732,7 @@ class CustomModelApp:
                     # [시니어 최적화] 텍스트 수정 발생 시 기존 단어 블록(배열) 파쇄를 통해 탭2 진입 시 자동 분할 재계산 유도
                     self.results_data[idx].pop('words', None)
                     self.apply_preview_subtitles(force_reload=True)
-            except Exception as e: print(f'[WARN] 인라인 편집 저장 오류: {e}')
+            except: pass
 
         entry.bind('<KeyRelease>', _on_key_release)
 
@@ -758,7 +758,10 @@ class CustomModelApp:
         if item: self.tree.selection_set(item); self.menu.post(e.x_root, e.y_root)
     def apply_preview_subtitles(self, force_reload=False):
         """[ASS 핫스왓] 사용자 디자인 설정을 반영한 ASS 파일을 동적 생성하여 VLC에 주입"""
-        if not self.results_data or not self.player: return
+        print(f"[DEBUG apply_preview_subtitles] called, force_reload={force_reload}, results_data count={len(self.results_data) if self.results_data else 0}, player={self.player is not None}")
+        if not self.results_data or not self.player: 
+            print(f"[DEBUG apply_preview_subtitles] EARLY RETURN - results_data={bool(self.results_data)}, player={bool(self.player)}")
+            return
         try:
             # --- HEX(#RRGGBB) → ASS(&H00BBGGRR&) 변환 ---
             def hex_to_ass(hex_color):
@@ -795,7 +798,6 @@ ScriptType: v4.00+
 PlayResX: 1920
 PlayResY: 1080
 WrapStyle: 0
-ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
@@ -822,8 +824,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             # --- A/B 핑퉁 핫스왓 ---
             suffix = "A" if getattr(self, '_ping_pong', False) else "B"
             self._ping_pong = not getattr(self, '_ping_pong', False)
-            _script_dir = os.path.dirname(os.path.abspath(__file__))
-            ass_name = os.path.join(_script_dir, f"temp_preview_{suffix}.ass")
+            ass_name = os.path.abspath(f"temp_preview_{suffix}.ass")
             
             with open(ass_name, 'w', encoding='utf-8-sig') as f:
                 f.write(ass_header)
@@ -831,6 +832,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 f.write('\n')
             
             self.preview_srt_path = ass_name
+            print(f"[DEBUG apply_preview_subtitles] ASS file written: {ass_name}")
+            print(f"[DEBUG apply_preview_subtitles] ASS file exists: {os.path.exists(ass_name)}")
+            # ASS 파일 내용 앞부분 출력
+            with open(ass_name, 'r', encoding='utf-8-sig') as _f:
+                _head = _f.read(400)
+            print(f"[DEBUG apply_preview_subtitles] ASS header:\n{_head}")
             self.player.set_subtitle(ass_name)
             
             # [시니어 최적화] 일시정지 상태일 때 제자리 점프로 프레임 새로고침
@@ -838,9 +845,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 curr = self.player.get_time()
                 if curr >= 0:
                     self.player.set_time(curr)
-        except Exception as e:
+        except Exception as _e:
             import traceback; traceback.print_exc()
-            print(f'[ERROR] apply_preview_subtitles 실패: {e}')
+            print(f'[DEBUG apply_preview_subtitles] EXCEPTION: {_e}')
     def toggle_play(self):
         if self.player: is_p = self.player.toggle_play(); self.btn_play.config(text=self.ICON_PAUSE if is_p else self.ICON_PLAY)
     def skip_time(self, ms): 
@@ -872,7 +879,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 pos = max(0.0, min(1.0, e.x / w))
                 self.player.set_position(pos)
                 self.seek_var.set(pos * 1000)
-        except Exception as e: print(f'[WARN] 시크바 이동 오류: {e}')
+        except: pass
 
 
     def update_loop(self):
@@ -946,7 +953,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         pw = paned.winfo_width()
                         handle.place(x=(pw - 40) // 2, y=coords[1] + 1)
                 self.root.after(100, _sync_position)
-            except Exception as e: print(f'[WARN] Sash 핸들 동기화 오류: {e}')
+            except: pass
         
         _sync_position()
 
