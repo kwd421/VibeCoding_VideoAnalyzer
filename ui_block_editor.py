@@ -217,39 +217,144 @@ class UIBlockEditor:
             self.block_canvas.move(it, dx, dy)
         self.drag_data["start_x"] = x
         self.drag_data["start_y"] = y
+        
+        target = None
+        for rmap in self.row_y_map:
+            if rmap['y_start'] <= y <= rmap['y_end']:
+                target = {'type': 'merge', 'idx': rmap['idx']}
+                break
+        if target is None:
+            for rmap in self.row_y_map:
+                if rmap['y_start'] - 10 <= y < rmap['y_start']:
+                    target = {'type': 'insert', 'idx': rmap['idx']}
+                    break
+                elif rmap['y_end'] < y <= rmap['y_end'] + 10:
+                    target = {'type': 'insert', 'idx': rmap['idx'] + 1}
+                    break
+
+        self.block_canvas.delete("drop_highlight")
+        if target is not None:
+            s_idx = self.drag_data["idx"]
+            w_idx = self.drag_data["w_idx"]
+            results_data = self.transcript_manager.get_all()
+            n_words = len(results_data[s_idx].get('words', []))
+            
+            is_valid = False
+            if target['type'] == 'merge':
+                target_idx = target['idx']
+                if target_idx == s_idx:
+                    is_valid = True
+                elif target_idx == s_idx - 1 and w_idx == 0:
+                    is_valid = True
+                elif target_idx == s_idx + 1 and w_idx == n_words - 1:
+                    is_valid = True
+            elif target['type'] == 'insert':
+                insert_idx = target['idx']
+                if insert_idx == s_idx and w_idx == 0:
+                    is_valid = True
+                elif insert_idx == s_idx + 1 and w_idx == n_words - 1:
+                    is_valid = True
+                if n_words <= 1:
+                    is_valid = False
+                
+            if is_valid:
+                if target['type'] == 'merge':
+                    rmap = next(r for r in self.row_y_map if r['idx'] == target['idx'])
+                    self.block_canvas.create_rectangle(10, rmap['y_start'] - 2, 2500, rmap['y_end'] + 2, fill="", outline="#e74c3c", width=2, dash=(4,4), tags="drop_highlight")
+                elif target['type'] == 'insert':
+                    insert_idx = target['idx']
+                    if insert_idx < len(self.row_y_map):
+                        rmap = self.row_y_map[insert_idx]
+                        y_pos = rmap['y_start'] - 8
+                    else:
+                        rmap = self.row_y_map[-1]
+                        y_pos = rmap['y_end'] + 8
+                    self.block_canvas.create_line(10, y_pos, 2500, y_pos, fill="#f1c40f", width=3, dash=(4,4), tags="drop_highlight")
+                self.block_canvas.tag_lower("drop_highlight")
 
     def on_block_release(self, event):
         if not getattr(self, 'drag_data', {}).get("items"): return
         y = self.block_canvas.canvasy(event.y)
-        target_idx = None
+        target = None
         for rmap in self.row_y_map:
-            if rmap['y_start'] - 10 <= y <= rmap['y_end'] + 10:
-                target_idx = rmap['idx']
+            if rmap['y_start'] <= y <= rmap['y_end']:
+                target = {'type': 'merge', 'idx': rmap['idx']}
                 break
+        if target is None:
+            for rmap in self.row_y_map:
+                if rmap['y_start'] - 10 <= y < rmap['y_start']:
+                    target = {'type': 'insert', 'idx': rmap['idx']}
+                    break
+                elif rmap['y_end'] < y <= rmap['y_end'] + 10:
+                    target = {'type': 'insert', 'idx': rmap['idx'] + 1}
+                    break
                 
-        if target_idx is not None:
+        if target is not None:
             s_idx = self.drag_data["idx"]
             w_idx = self.drag_data["w_idx"]
             results_data = self.transcript_manager.get_all()
+            n_words = len(results_data[s_idx].get('words', []))
             
-            w_obj = results_data[s_idx]['words'].pop(w_idx)
-            if 'words' not in results_data[target_idx]:
-                 results_data[target_idx]['words'] = []
-                 
-            results_data[target_idx]['words'].append(w_obj)
-            
-            for u in set([s_idx, target_idx]):
-                w_ls = results_data[u]['words']
-                if w_ls:
-                    w_ls.sort(key=lambda x: x['s'])
-                    new_t = ' '.join(w['word'].strip() for w in w_ls)
-                    results_data[u]['t'] = new_t
-                    results_data[u]['s'] = w_ls[0]['s']
-                    results_data[u]['e'] = w_ls[-1]['e']
-                else:
-                    results_data[u]['t'] = ""
-
-            self.rebuild_tree_and_render()
+            is_valid = False
+            if target['type'] == 'merge':
+                target_idx = target['idx']
+                if target_idx == s_idx:
+                    is_valid = True
+                elif target_idx == s_idx - 1 and w_idx == 0:
+                    is_valid = True
+                elif target_idx == s_idx + 1 and w_idx == n_words - 1:
+                    is_valid = True
+            elif target['type'] == 'insert':
+                insert_idx = target['idx']
+                if insert_idx == s_idx and w_idx == 0:
+                    is_valid = True
+                elif insert_idx == s_idx + 1 and w_idx == n_words - 1:
+                    is_valid = True
+                if n_words <= 1:
+                    is_valid = False
+                
+            if not is_valid or (target['type'] == 'merge' and target['idx'] == s_idx):
+                if not is_valid:
+                    self.block_canvas.delete("drop_highlight")
+                    self.drag_data = {"items": []}
+                    self.render_block_view()
+                    return
+            else:
+                w_obj = results_data[s_idx]['words'].pop(w_idx)
+                affected_indices = set([s_idx])
+                
+                if target['type'] == 'merge':
+                    target_idx = target['idx']
+                    if 'words' not in results_data[target_idx]:
+                         results_data[target_idx]['words'] = []
+                    results_data[target_idx]['words'].append(w_obj)
+                    affected_indices.add(target_idx)
+                elif target['type'] == 'insert':
+                    insert_idx = target['idx']
+                    new_row = {'t': '', 's': w_obj['s'], 'e': w_obj['e'], 'words': [w_obj]}
+                    results_data.insert(insert_idx, new_row)
+                    adjusted_s_idx = s_idx + 1 if insert_idx <= s_idx else s_idx
+                    affected_indices.add(adjusted_s_idx)
+                    affected_indices.add(insert_idx)
+                
+                for u in affected_indices:
+                    w_ls = results_data[u]['words']
+                    if w_ls:
+                        w_ls.sort(key=lambda x: x['s'])
+                        new_t = ' '.join(w['word'].strip() for w in w_ls)
+                        results_data[u]['t'] = new_t
+                        results_data[u]['s'] = w_ls[0]['s']
+                        results_data[u]['e'] = w_ls[-1]['e']
+                    else:
+                        results_data[u]['t'] = ""
+    
+                empty_indices = [idx for idx in sorted(list(affected_indices), reverse=True) if not results_data[idx].get('words', [])]
+                for idx in empty_indices:
+                    results_data.pop(idx)
+    
+                self.rebuild_tree_and_render()
+        
+        self.block_canvas.delete("drop_highlight")
         
         self.drag_data = {"items": []}
         self.render_block_view()

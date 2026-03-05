@@ -75,7 +75,7 @@ class CustomModelApp:
         self.main_paned.pack(fill=tk.BOTH, expand=True)
 
         left_f = tk.Frame(self.main_paned, bg="#1a1a1a")
-        self.main_paned.add(left_f, minsize=750)
+        self.main_paned.add(left_f, minsize=400, width=500)
 
         self.video_canvas = tk.Frame(left_f, bg="black")
         self.video_canvas.pack(fill=tk.BOTH, expand=True, padx=5, pady=(2, 5))
@@ -101,7 +101,7 @@ class CustomModelApp:
 
         self.lbl_time = tk.Label(ctrl, text="00:00 / 00:00", bg="#2d2d2d", fg="white")
         self.lbl_time.pack(side=tk.RIGHT, padx=20)
-        right_f = tk.Frame(self.main_paned, padx=15); self.main_paned.add(right_f, minsize=450)
+        right_f = tk.Frame(self.main_paned, padx=15); self.main_paned.add(right_f, minsize=600, width=800)
         af = tk.LabelFrame(right_f, text=" 분석 및 편집 설정 ", padx=10, pady=10); af.pack(fill=tk.X, pady=10)
         tk.Button(af, text="영상 파일 선택", command=self.on_select_video, bg="#34495e", fg="white", font=("bold")).pack(fill=tk.X, pady=5)
         model_f = tk.Frame(af); model_f.pack(fill=tk.X, pady=5)
@@ -112,14 +112,14 @@ class CustomModelApp:
         self.ai_model_var.trace_add("write", lambda *args: self.reset_action_button())
         mf = tk.Frame(af); mf.pack(fill=tk.X)
         self.mode_var = tk.StringVar(value="대사 변환 및 컷편집 (종합)")
-        self.mode_combo = ttk.Combobox(mf, textvariable=self.mode_var, values=["자연어-대사 변환", "대사 변환 및 컷편집 (종합)", "깜놀 구간 탐색 (초고속)", "무음 제거 편집 (VAD)", "자동 챕터 분할 (CLIP)"], state="readonly", width=30)
+        self.mode_combo = ttk.Combobox(mf, textvariable=self.mode_var, values=["자연어-대사 변환", "대사 변환 및 컷편집", "깜놀 구간 탐색", "무음 제거 편집 (VAD)", "자동 챕터 분할 (CLIP)"], state="readonly", width=30)
         self.mode_combo.pack(side=tk.LEFT, padx=5, pady=10); self.mode_var.trace_add("write", lambda *args: self.reset_action_button())
         self.btn_analyze = tk.Button(af, text="분석 시작", command=self.on_start_analysis, bg="#2980b9", fg="white", font=("bold"), pady=12); self.btn_analyze.pack(fill=tk.X, pady=5)
         self.btn_stop = tk.Button(af, text="작업 중지", command=self.on_stop_action, bg="#c0392b", fg="white", font=("bold"), state=tk.DISABLED); self.btn_stop.pack(fill=tk.X, pady=2)
         self.save_frame = tk.Frame(right_f); self.save_frame.pack(fill=tk.X, pady=2); self.save_frame.pack_forget()
         tk.Label(self.save_frame, text="[ 영상 및 타임라인 내보내기 ]", fg="#8e44ad", font=("bold", 10)).pack(pady=2)
         btn_box = tk.Frame(self.save_frame); btn_box.pack(fill=tk.X, pady=2)
-        self.btn_fast_save = tk.Button(btn_box, text="🚀 초고속 복사", command=lambda: self.start_export(fast=True), bg="#8e44ad", fg="white", pady=8); self.btn_fast_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        self.btn_fast_save = tk.Button(btn_box, text="🚀 초고속 인코딩", command=lambda: self.start_export(fast=True), bg="#8e44ad", fg="white", pady=8); self.btn_fast_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
         self.btn_pro_save = tk.Button(btn_box, text="🎯 정밀 인코딩", command=lambda: self.start_export(fast=False), bg="#2c3e50", fg="white", pady=8); self.btn_pro_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
         self.btn_xml_save = tk.Button(btn_box, text="🎬 타임라인 XML", command=self.on_export_xml, bg="#16a085", fg="white", pady=8); self.btn_xml_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
         self.lbl_status = tk.Label(right_f, text="준비됨", fg="#27ae60", font=("bold", 10)); self.lbl_status.pack(fill=tk.X, pady=5)
@@ -161,11 +161,7 @@ class CustomModelApp:
         
         # [시니어 최적화] UI 공간 절약을 위해 가로 배치 및 간격 조절
         set_f = tk.Frame(opt); set_f.pack(fill=tk.X, pady=2)
-        tk.Label(set_f, text="초기 프롬프트:").pack(side=tk.LEFT)
-        self.initial_prompt_var = tk.StringVar(value="")
-        tk.Entry(set_f, textvariable=self.initial_prompt_var, width=25).pack(side=tk.LEFT, padx=5)
-        
-        tk.Label(set_f, text="빔 사이즈:").pack(side=tk.LEFT, padx=(10, 0))
+        tk.Label(set_f, text="빔 사이즈:").pack(side=tk.LEFT)
         self.beam_size_var = tk.IntVar(value=5)
         tk.Scale(set_f, from_=1, to=15, orient=tk.HORIZONTAL, variable=self.beam_size_var, showvalue=1, length=120).pack(side=tk.LEFT, padx=5)
         
@@ -201,6 +197,9 @@ class CustomModelApp:
         tk.Label(adv_f, text="가속:").pack(side=tk.LEFT)
         self.device_var = tk.StringVar(value="자동 감지 (auto)")
         ttk.Combobox(adv_f, textvariable=self.device_var, values=["자동 감지 (auto)", "NVIDIA (cuda)", "Apple Mac (mps)", "CPU (멀티코어)"], state="readonly", width=14).pack(side=tk.LEFT, padx=5)
+
+        self.remove_punctuation_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(adv_f, text="문장 부호 소거 (.,-)", variable=self.remove_punctuation_var, fg="#34495e").pack(side=tk.LEFT, padx=5)
 
         lf = tk.Frame(opt)
         lf.pack(fill=tk.X, pady=2)
@@ -276,7 +275,6 @@ class CustomModelApp:
         else: mapped_dev = "cpu"
 
         analysis_options = AnalysisSettings(
-            initial_prompt=self.initial_prompt_var.get(),
             beam_size=self.beam_size_var.get(),
             use_denoise=self.use_denoise_var.get(),
             use_dominant=self.use_dominant_var.get(),
@@ -287,6 +285,7 @@ class CustomModelApp:
             use_word_timestamps=True,
             use_whisper_vad=self.use_whisper_vad_var.get(),
             use_silero_vad=self.use_silero_vad_var.get(),
+            remove_punctuation=getattr(self, 'remove_punctuation_var', tk.BooleanVar(value=False)).get(),
             device_mode=mapped_dev
         )
         

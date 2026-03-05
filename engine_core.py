@@ -49,7 +49,6 @@ class HyperTranscriptionEngine:
         if self.fw_model is None or self.device_info != device_mode:
             self.device_info = device_mode
             best_device = self._detect_best_device(device_mode)
-            
             # CTranslate2의 디바이스 맵핑 (cuda/cpu 외에는 fall back)
             ct2_dev = "cuda" if best_device == "cuda" else "cpu"
             c_type = "float16" if ct2_dev == "cuda" else "int8"
@@ -128,8 +127,6 @@ class HyperTranscriptionEngine:
         model = self.get_model(device_mode)
         
         beam_size = options.beam_size
-        initial_prompt = options.initial_prompt
-        if initial_prompt and not initial_prompt.strip(): initial_prompt = None
         use_denoise = options.use_denoise
         use_dominant = options.use_dominant
         selected_lang = options.language
@@ -187,10 +184,8 @@ class HyperTranscriptionEngine:
                         if len(sub_chunk) <= 1600: return []
                         
                         # [시니어 튜닝] Whisper 내부 VAD와 단어 단위 정밀 타임스탬프를 병행하여 숨소리/공백 싱크 밀림 원천 차단
-                        segs, _ = model.transcribe(
-                            sub_chunk, 
+                        transcribe_kwargs = dict(
                             beam_size=beam_size, 
-                            initial_prompt=initial_prompt,
                             language=selected_lang, 
                             vad_filter=use_whisper_vad,
                             vad_parameters=dict(min_silence_duration_ms=500, threshold=0.5) if use_whisper_vad else None,
@@ -198,6 +193,9 @@ class HyperTranscriptionEngine:
                             temperature=0.0,
                             word_timestamps=use_word_timestamps
                         )
+                            
+                        segs, _ = model.transcribe(sub_chunk, **transcribe_kwargs)
+                        segs_list = list(segs)
                         
                         sub_max_time = vad_e - vad_s
                         offset_vad = offset + vad_s
@@ -229,13 +227,15 @@ class HyperTranscriptionEngine:
                             vad_true_end = sub_max_time
                         # -----------------------------------------------------------------------------
                         
-                        segs_list = list(segs)
                         num_segs = len(segs_list)
                         extracted_results = []
                         
                         for i, s in enumerate(segs_list):
                             if stop_event.is_set(): break
                             text = s.text.strip()
+                            if getattr(options, 'remove_punctuation', False):
+                                import re
+                                text = re.sub(r'[.,\-]', '', text).strip()
                             if not text: continue
                             
                             seg_s = s.start
@@ -260,12 +260,17 @@ class HyperTranscriptionEngine:
                                     if i == num_segs - 1 and w_idx == len(s.words) - 1:
                                         w_e = seg_e 
                                         
+                                    word_str = w.word
+                                    if getattr(options, 'remove_punctuation', False):
+                                        import re
+                                        word_str = re.sub(r'[.,\-]', '', word_str)
+                                        
                                     if w_s - last_e > split_gap_sec:
                                         t = "".join(w.word for w in curr_words).strip()
                                         if t and last_e > curr_s: extracted.append(TranscriptSegment(s=offset_vad + curr_s, e=offset_vad + last_e, t=t, words=curr_words))
-                                        curr_words, curr_s = [TranscriptWord(word=w.word, s=offset_vad + w_s, e=offset_vad + w_e)], w_s
+                                        curr_words, curr_s = [TranscriptWord(word=word_str, s=offset_vad + w_s, e=offset_vad + w_e)], w_s
                                     else:
-                                        curr_words.append(TranscriptWord(word=w.word, s=offset_vad + w_s, e=offset_vad + w_e))
+                                        curr_words.append(TranscriptWord(word=word_str, s=offset_vad + w_s, e=offset_vad + w_e))
                                     last_e = w_e
                                     
                                 t = "".join(w.word for w in curr_words).strip()
