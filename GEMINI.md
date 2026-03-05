@@ -49,6 +49,7 @@
 ### 📝 데이터 및 로직 (Logic)
 - **Strict Language Bounding**: 선택 언어와 다른 외국어 환각 발생 시 정규식으로 즉각 폐기한다.
 - **Subtitle Partitioning**: 가독성을 위해 화면 폭을 우선한다. 문장이 길면 `_smart_split_text`로 자르되, 너무 짧은 파편은 앞 문장에 병합한다.
+- **Word Block Rule**: 단어 블록 이동(Merge/Insert)은 반드시 해당 행의 **첫 단어** 또는 **마지막 단어**일 때만 허용하며, 중간 단어는 드래그 이동을 금지한다. (편집은 가능)
 - **Local Only**: 외부 API 연동을 지양하고, 모든 분석은 로컬 컴퓨팅 자원만을 활용한다.
 
 ## 5. 향후 과제 (TODO)

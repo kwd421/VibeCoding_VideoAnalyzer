@@ -1,3 +1,4 @@
+import customtkinter as ctk
 import os
 import sys
 import threading
@@ -29,7 +30,7 @@ class CustomModelApp:
         self.root = root
         self.root.title("VAD AI Studio v26")
         self.root.geometry("1300x850")
-        self.root.configure(bg='#F2F2F7')
+        self.root.configure(fg_color='#F2F2F7')
         
         # [Apple HIG] 라이트 모드 색상 팔레트
         self.C = {
@@ -52,24 +53,20 @@ class CustomModelApp:
         # [Apple HIG] ttk 스타일 테마
         style = ttk.Style()
         style.theme_use('clam')
-        _font = ('Noto Sans KR', 10); _font_s = ('Noto Sans KR', 11); _font_h = ('Noto Sans KR', 11, 'bold')
+        _font = ('Segoe UI Variable Display', 10); _font_s = ('Segoe UI Variable Display', 9); _font_h = ('Segoe UI Variable Display', 11, 'bold')
         style.configure('.', background=C['bg'], foreground=C['text'], font=_font, borderwidth=0)
         style.configure('TFrame', background=C['bg'])
         style.configure('TLabel', background=C['bg'], foreground=C['text'], font=_font)
         style.configure('TLabelframe', background=C['bg2'], foreground=C['text'])
         style.configure('TLabelframe.Label', background=C['bg2'], foreground=C['accent'], font=_font_h)
-        # Treeview rowheight를 34px로 조정 (11pt 폰트 대응)
+        # Treeview rowheight를 40px로 수정해 노트 느낌 강화
+        style.configure('Treeview', background=C['bg2'], foreground=C['text'], fieldbackground=C['bg2'],
+                         rowheight=40, font=_font_s, borderwidth=0)
+        style.configure('Treeview.Heading', background=C['bg2'], foreground=C['text2'],
+                         font=('Segoe UI Variable Display', 9), borderwidth=0, relief='flat')
         # 선택된 행의 색상을 투명한 느낌의 연파랑으로 조정
         style.map('Treeview', background=[('selected', '#E7F1FF')], foreground=[('selected', C['text'])])
         style.map('Treeview.Heading', background=[('active', C['bg3'])])
-        
-        # [사용자 요청] Treeview에 수직 구분선 느낌 추가
-        style.configure('Treeview', borderwidth=1, relief='flat', background=C['bg2'], fieldbackground=C['bg2'])
-        # 행 높이 및 글꼴 설정 복구 (이전 에딧에서 누락된 부분 보강)
-        style.configure('Treeview', rowheight=34, font=_font_s)
-        style.configure('Treeview.Heading', background=C['bg2'], foreground=C['text2'], font=('Noto Sans KR', 10), borderwidth=0, relief='flat')
-        
-        style.layout('Treeview.Item', [('Treeview.padding', {'sticky': 'nswe', 'children': [('Treeview.indicator', {'side': 'left', 'sticky': ''}), ('Treeview.image', {'side': 'left', 'sticky': ''}), ('Treeview.text', {'sticky': 'nswe'})]})])
         style.configure('TNotebook', background=C['bg'], borderwidth=0)
         style.configure('TNotebook.Tab', background=C['bg3'], foreground=C['text2'],
                          font=_font_s, padding=[14, 7], borderwidth=0)
@@ -127,22 +124,21 @@ class CustomModelApp:
 
     def setup_ui(self):
         C = self.C
-        _f = ('Noto Sans KR', 11); _fb = ('Noto Sans KR', 11, 'bold')
+        _f = ('Segoe UI Variable Display', 9); _fb = ('Segoe UI Variable Display', 9, 'bold')
         def _hover(btn, n, h):
             btn.bind('<Enter>', lambda e: btn.config(bg=h))
             btn.bind('<Leave>', lambda e: btn.config(bg=n))
         
         # ── 최상위: 좌측(비디오+타임라인) | 우측(인스펙터) ──
-        self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashrelief=tk.FLAT, sashwidth=6, bg=C['border'])
+        self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashrelief=tk.FLAT, sashwidth=1, bg=C['border'])
         self.main_paned.pack(fill=tk.BOTH, expand=True)
         
         center_frame = tk.Frame(self.main_paned, bg=C['bg'])
         self.main_paned.add(center_frame, minsize=600, width=900)
         
         # 세로 분할: 상단(비디오) | 하단(타임라인)
-        self.v_paned = tk.PanedWindow(center_frame, orient=tk.VERTICAL, sashrelief=tk.FLAT, sashwidth=6, bg=C['border'])
-        self.v_paned.pack(fill=tk.BOTH, expand=True)
-        v_paned = self.v_paned
+        v_paned = tk.PanedWindow(center_frame, orient=tk.VERTICAL, sashrelief=tk.FLAT, sashwidth=2, bg=C['border'])
+        v_paned.pack(fill=tk.BOTH, expand=True)
         
         video_zone = tk.Frame(v_paned, bg='#000000')
         v_paned.add(video_zone, minsize=200, height=480)
@@ -183,7 +179,81 @@ class CustomModelApp:
         self.lbl_time = tk.Label(ctrl, text='00:00 / 00:00', bg=C['bg2'], fg=C['text2'], font=_f)
         self.lbl_time.pack(side=tk.RIGHT, padx=16)
         
-        # [사용자 요청] 자막 스타일 설정은 '⚙️ 자막 설정' 탭으로 완전 이관됨 (하단 코드 참고)
+        # --- 자막 렌더링 설정 (비디오 하단 인라인 바) ---
+        sub_f = tk.Frame(video_zone, bg=C['bg2'], pady=3)
+        sub_f.pack(fill=tk.X, side=tk.BOTTOM, before=ctrl)
+        
+        def _pick_c(var, btn, title):
+            from tkinter import colorchooser
+            c = colorchooser.askcolor(title=title, color=var.get())[1]
+            if c:
+                var.set(c)
+                r, g, b = int(c[1:3],16), int(c[3:5],16), int(c[5:7],16)
+                luma = r*0.299 + g*0.587 + b*0.114
+                fg_col = "black" if luma > 128 else "white"
+                btn.config(bg=c, fg=fg_col, text=f"■ {title}")
+            
+        r1 = tk.Frame(sub_f, bg=C['bg2']); r1.pack(fill=tk.X, pady=2)
+        tk.Label(r1, text="폰트:", bg=C['bg2'], fg=C['text'], font=('Segoe UI', 9)).pack(side=tk.LEFT)
+        
+        # [ASS 핫스왓] 커스텀 폰트 피커 (시스템 폰트 전체 + 검색 + 자체 프리뷰)
+        self._sub_font_name = tk.StringVar(value="맑은 고딕")
+        self._font_btn = tk.Button(r1, text="맑은 고딕 ▼", bg=C['bg3'], fg=C['text'], font=("맑은 고딕", 9), relief=tk.FLAT, command=self._open_font_picker, width=14)
+        self._font_btn.pack(side=tk.LEFT, padx=(2, 10))
+        # sub_font 호환성 래퍼
+        class _FontProxy:
+            def __init__(self, var): self._var = var
+            def get(self): return self._var.get()
+            def set(self, v): self._var.set(v)
+        self.sub_font = _FontProxy(self._sub_font_name)
+        self._sub_font_name.trace_add("write", lambda *_: self._font_btn.config(text=f"{self._sub_font_name.get()} ▼", font=(self._sub_font_name.get(), 9)))
+        tk.Label(r1, text="폰트 크기:", bg=C['bg2'], fg=C['text'], font=('Segoe UI', 9)).pack(side=tk.LEFT)
+        self.sub_font_size = tk.IntVar(value=80)
+        ttk.Combobox(r1, textvariable=self.sub_font_size, values=[50,55,60,65,70,75,80,85,90,95,100,105,110,115,120,125,130,135,140,145,150], width=3, state="readonly").pack(side=tk.LEFT, padx=(2, 10))
+        tk.Label(r1, text="자막 상하 위치:", bg=C['bg2'], fg=C['text'], font=('Segoe UI', 9)).pack(side=tk.LEFT)
+        self.sub_y_pos = tk.IntVar(value=50)
+        tk.Scale(r1, from_=0, to=300, variable=self.sub_y_pos, orient=tk.HORIZONTAL, showvalue=0, bg=C['bg2'], highlightthickness=0, troughcolor=C['bg3'], fg=C['accent'], sliderrelief=tk.FLAT, length=80).pack(side=tk.LEFT)
+        
+        r2 = tk.Frame(sub_f, bg=C['bg2']); r2.pack(fill=tk.X, pady=4)
+        self.sub_color_f = tk.StringVar(value="#ffffff")
+        btn_cf = tk.Button(r2, text="■ 글자색", bg="#ffffff", fg="black", font=('Segoe UI', 9), relief=tk.FLAT, command=lambda: _pick_c(self.sub_color_f, btn_cf, "글자색"))
+        btn_cf.pack(side=tk.LEFT, padx=(0, 10))
+        
+        tk.Label(r2, text="윤곽선:", bg=C['bg2'], fg=C['text'], font=('Segoe UI', 9)).pack(side=tk.LEFT)
+        self.sub_outline = tk.IntVar(value=3)
+        ttk.Combobox(r2, textvariable=self.sub_outline, values=[0,1,2,3,4,5,6,8,10], width=2, state="readonly").pack(side=tk.LEFT, padx=2)
+        self.sub_color_o = tk.StringVar(value="#000000")
+        btn_co = tk.Button(r2, text="■ 윤곽색", bg="#000000", fg="white", font=('Segoe UI', 9), relief=tk.FLAT, command=lambda: _pick_c(self.sub_color_o, btn_co, "윤곽색"))
+        btn_co.pack(side=tk.LEFT, padx=(5, 10))
+        
+        tk.Label(r2, text="이중윤곽선:", bg=C['bg2'], fg=C['text'], font=('Segoe UI', 9)).pack(side=tk.LEFT)
+        self.sub_shadow = tk.IntVar(value=3)
+        ttk.Combobox(r2, textvariable=self.sub_shadow, values=[0,1,2,3,4,5,6,8,10], width=2, state="readonly").pack(side=tk.LEFT, padx=2)
+        self.sub_color_s = tk.StringVar(value="#000000")
+        btn_cs = tk.Button(r2, text="■ 이중윤곽색", bg="#000000", fg="white", font=("bold", 9), relief=tk.FLAT, command=lambda: _pick_c(self.sub_color_s, btn_cs, "이중윤곽색"))
+        btn_cs.pack(side=tk.LEFT, padx=5)
+        
+        # [ASS 핫스왑] 모든 자막 디자인 위젯 변경 시 디바운스로 자동 적용 (CPU 부하 ≈ 0%)
+        self._sub_debounce = None
+        self._pos_debounce = None
+        def _schedule_sub_update(*_):
+            if self._sub_debounce: self.root.after_cancel(self._sub_debounce)
+            self._sub_debounce = self.root.after(300, self.apply_vlc_sub_settings)
+        def _schedule_pos_update(*_):
+            if self._pos_debounce: self.root.after_cancel(self._pos_debounce)
+            self._pos_debounce = self.root.after(50, self.apply_vlc_sub_settings)
+        
+        # IntVar / StringVar 트레이스
+        self.sub_font_size.trace_add("write", _schedule_sub_update)
+        self.sub_y_pos.trace_add("write", _schedule_pos_update)  # 위치는 50ms 디바운스로 실시간 반영
+        self.sub_outline.trace_add("write", _schedule_sub_update)
+        self.sub_shadow.trace_add("write", _schedule_sub_update)
+        self.sub_color_f.trace_add("write", _schedule_sub_update)
+        self.sub_color_o.trace_add("write", _schedule_sub_update)
+        self.sub_color_s.trace_add("write", _schedule_sub_update)
+        # 폰트 이름 변경 트레이스
+        self._sub_font_name.trace_add("write", _schedule_sub_update)
+        # -----------------------------
 
         # ═══ ZONE 2: 타임라인 (Bottom) ═══
         timeline_zone = tk.Frame(v_paned, bg=C['bg'])
@@ -193,19 +263,12 @@ class CustomModelApp:
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         self.tab_tree = tk.Frame(self.notebook, bg=C['bg2'])
         self.notebook.add(self.tab_tree, text=' 📋 자막 리스트 ')
-        
         self.tab_canvas = tk.Frame(self.notebook, bg=C['bg'])
         self.notebook.add(self.tab_canvas, text=' 🧩 단어 블록 ')
         
-        # [사용자 요청] 자막 설정 탭 별도 분리
-        self.tab_style = tk.Frame(self.notebook, bg=C['bg'])
-        self.notebook.add(self.tab_style, text=' ⚙️ 자막 설정 ')
-        
-        # ── 자막 리스트 Treeview 설정 ──
         self.tree = ttk.Treeview(self.tab_tree, columns=('no','start','end','text'), show='headings')
-        self.tree.tag_configure('active', background='#D0E5FF')
         self.tree.heading('no', text='#'); self.tree.heading('start', text='시작'); self.tree.heading('end', text='종료'); self.tree.heading('text', text='내용')
-        self.tree.column('no', width=34, anchor=tk.CENTER); self.tree.column('start', width=70, anchor=tk.CENTER); self.tree.column('end', width=70, anchor=tk.CENTER); self.tree.column('text', width=400)
+        self.tree.column('no', width=36, anchor=tk.CENTER); self.tree.column('start', width=80, anchor=tk.CENTER); self.tree.column('end', width=80, anchor=tk.CENTER); self.tree.column('text', width=400)
         sc = ttk.Scrollbar(self.tab_tree, orient=tk.VERTICAL, command=self.tree.yview); self.tree.configure(yscrollcommand=sc.set)
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); sc.pack(side=tk.RIGHT, fill=tk.Y)
         
@@ -238,13 +301,14 @@ class CustomModelApp:
         def _card(parent, title=''):
             f = tk.Frame(parent, bg=C['bg2'], highlightbackground=C['border'], highlightthickness=1, bd=0, padx=16, pady=12); f.pack(fill=tk.X, padx=12, pady=(0, 2))
             shadow = tk.Frame(parent, bg='#E5E5E7', height=2); shadow.pack(fill=tk.X, padx=14, pady=(0, 6)); shadow.pack_propagate(False) # 그림자
-            if title: tk.Label(f, text=title, bg=C['bg2'], fg=C['text'], font=('Noto Sans KR', 11, 'bold')).pack(anchor=tk.W, pady=(0, 6))
+            if title: tk.Label(f, text=title, bg=C['bg2'], fg=C['text'], font=('Segoe UI Variable Display', 11, 'bold')).pack(anchor=tk.W, pady=(0, 6))
             return f
         def _row(parent):
             r = tk.Frame(parent, bg=C['bg2']); r.pack(fill=tk.X, pady=4); return r
         def _sep(parent):
             tk.Frame(parent, bg=C['border'], height=1).pack(fill=tk.X, pady=8)
         
+        tk.Label(insp_inner, text='인스펙터', bg=C['bg'], fg=C['text'], font=('Segoe UI Variable Display', 13, 'bold')).pack(anchor=tk.W, padx=16, pady=(12, 6))
         
         # ── 카드 1: 소스 및 엔진 ──
         c1 = _card(insp_inner, '🎬  소스 및 엔진')
@@ -264,7 +328,7 @@ class CustomModelApp:
         self.mode_var = tk.StringVar(value='대사 변환 및 컷편집 (종합)')
         self.mode_combo = ttk.Combobox(c2, textvariable=self.mode_var, values=['자연어-대사 변환', '대사 변환 및 컷편집', '깜놀 구간 탐색', '무음 제거 편집 (VAD)', '자동 챕터 분할 (CLIP)'], state='readonly')
         self.mode_combo.pack(fill=tk.X, pady=(0,6)); self.mode_var.trace_add('write', lambda *_: self.reset_action_button())
-        self.btn_analyze = tk.Button(c2, text='  분석 시작  ', command=self.on_start_analysis, bg=C['accent'], fg='white', font=('Noto Sans KR', 13, 'bold'), relief='flat', bd=0, compound='center', pady=10, cursor='hand2'); self.btn_analyze.pack(fill=tk.X, pady=(0,4)); _hover(self.btn_analyze, C['accent'], '#0062CC')
+        self.btn_analyze = tk.Button(c2, text='  분석 시작  ', command=self.on_start_analysis, bg=C['accent'], fg='white', font=('Segoe UI Variable Display', 11, 'bold'), relief='flat', bd=0, compound='center', pady=10, cursor='hand2'); self.btn_analyze.pack(fill=tk.X, pady=(0,4)); _hover(self.btn_analyze, C['accent'], '#0062CC')
         self.btn_stop = tk.Button(c2, text='  작업 중지  ', command=self.on_stop_action, bg=C['bg3'], fg=C['red'], font=_fb, relief='flat', bd=0, compound='center', state=tk.DISABLED, pady=5, cursor='hand2'); self.btn_stop.pack(fill=tk.X); _hover(self.btn_stop, C['bg3'], C['border'])
         self.lbl_status = tk.Label(c2, text='준비됨', fg=C['green'], bg=C['bg2'], font=_f); self.lbl_status.pack(fill=tk.X, pady=(6,0))
         self.progress_var = tk.DoubleVar(); ttk.Progressbar(c2, variable=self.progress_var).pack(fill=tk.X, pady=(4,0))
@@ -274,113 +338,29 @@ class CustomModelApp:
         self.btn_pro_save = tk.Button(btn_box, text='  🎯 정밀  ', command=lambda: self.start_export(fast=False), bg=C['bg3'], fg=C['text'], font=_f, relief='flat', bd=0, compound='center', pady=6, cursor='hand2'); self.btn_pro_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2); _hover(self.btn_pro_save, C['bg3'], C['border'])
         self.btn_xml_save = tk.Button(btn_box, text='  🎬 XML  ', command=self.on_export_xml, bg=C['bg3'], fg=C['text'], font=_f, relief='flat', bd=0, compound='center', pady=6, cursor='hand2'); self.btn_xml_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2,0)); _hover(self.btn_xml_save, C['bg3'], C['border'])
         
-        # ── 카드 3: 세부 튜닝 (다시 밖으로 이동) ──
+        # ── 카드 3: 세부 튜닝 ──
         c3 = _card(insp_inner, '🎛  세부 튜닝')
-        
-        # [내부 고정 값] 빔 사이즈 5, 소음 제거/주인공 기능 UI 제거 (사용자 요청)
-        self.beam_size_var = tk.IntVar(value=5)
-        self.use_denoise_var = tk.BooleanVar(value=False)
-        self.use_dominant_var = tk.BooleanVar(value=False)
-        
+        r = _row(c3); tk.Label(r, text='빔 사이즈', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
+        self.beam_size_var = tk.IntVar(value=5); tk.Scale(r, from_=1, to=15, orient=tk.HORIZONTAL, variable=self.beam_size_var, showvalue=1, length=100, bg=C['bg2'], fg=C['text'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.RIGHT)
+        _sep(c3)
         chk_cfg = dict(bg=C['bg2'], selectcolor=C['bg3'], activebackground=C['bg2'], font=_f, relief=tk.FLAT, bd=0)
-        self.remove_punctuation_var = tk.BooleanVar(value=True); tk.Checkbutton(c3, text='✂️문장부호 제거', variable=self.remove_punctuation_var, fg=C['text2'], **chk_cfg).pack(anchor=tk.W, pady=1)
+        self.use_denoise_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🔇 소음 제거', variable=self.use_denoise_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
+        self.use_dominant_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='👤 주인공만', variable=self.use_dominant_var, fg=C['orange'], **chk_cfg).pack(anchor=tk.W, pady=1)
+        self.remove_punctuation_var = tk.BooleanVar(value=True); tk.Checkbutton(c3, text='✂️ 문장부호 제거', variable=self.remove_punctuation_var, fg=C['text2'], **chk_cfg).pack(anchor=tk.W, pady=1)
         _sep(c3)
         self.use_silero_vad_var = tk.BooleanVar(value=True); tk.Checkbutton(c3, text='외부 VAD (Silero)', variable=self.use_silero_vad_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         self.use_whisper_vad_var = tk.BooleanVar(value=True); tk.Checkbutton(c3, text='내부 VAD (Whisper)', variable=self.use_whisper_vad_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         _sep(c3)
-        
         r = _row(c3); tk.Label(r, text='무음 길이', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
         self.silence_dur_var = tk.DoubleVar(value=2.0); tk.Entry(r, textvariable=self.silence_dur_var, width=5, bg=C['bg3'], fg=C['text'], insertbackground=C['text'], relief=tk.FLAT, font=_f).pack(side=tk.RIGHT)
-        
         r = _row(c3); tk.Label(r, text='음성 패딩', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
         self.speech_pad_var = tk.DoubleVar(value=0.1); tk.Entry(r, textvariable=self.speech_pad_var, width=5, bg=C['bg3'], fg=C['text'], insertbackground=C['text'], relief=tk.FLAT, font=_f).pack(side=tk.RIGHT)
-        
         r = _row(c3); tk.Label(r, text='VAD 임계', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
-        self.vad_threshold_var = tk.DoubleVar(value=0.35); tk.Scale(r, from_=0.1, to=0.9, resolution=0.05, orient=tk.HORIZONTAL, variable=self.vad_threshold_var, showvalue=1, length=120, bg=C['bg2'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.RIGHT)
-        
+        self.vad_threshold_var = tk.DoubleVar(value=0.35); tk.Scale(r, from_=0.1, to=0.9, resolution=0.05, orient=tk.HORIZONTAL, variable=self.vad_threshold_var, showvalue=1, length=90, bg=C['bg2'], fg=C['text'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.RIGHT)
         r = _row(c3); tk.Label(r, text='대사 길이', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
-        self.max_len_int = tk.IntVar(value=50)
-        tk.Scale(r, from_=10, to=80, orient=tk.HORIZONTAL, variable=self.max_len_int, showvalue=1, length=120, bg=C['bg2'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.RIGHT)
+        self.max_len_int = tk.IntVar(value=50); self.max_len_str = tk.StringVar(value='50')
+        tk.Scale(r, from_=10, to=50, orient=tk.HORIZONTAL, variable=self.max_len_int, showvalue=0, command=lambda v: self.max_len_str.set(str(v)), length=90, bg=C['bg2'], fg=C['text'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.RIGHT)
         
-        # [사용자 요청] ── 자막 설정 (스타일) 탭 UI 통합 구현 ──
-        cs = self.tab_style
-        st_inner = tk.Frame(cs, bg=C['bg'], padx=30, pady=20); st_inner.pack(fill=tk.BOTH, expand=True)
-        
-        def _st_row(label):
-            fr = tk.Frame(st_inner, bg=C['bg']); fr.pack(fill=tk.X, pady=8)
-            tk.Label(fr, text=label, bg=C['bg'], fg=C['text'], font=_fb, width=14, anchor=tk.W).pack(side=tk.LEFT)
-            return fr
-
-        # 디바운스 타이머 및 실시간 업데이트
-        self._sub_debounce = None
-        def _update_sub(*_):
-            if self._sub_debounce: self.root.after_cancel(self._sub_debounce)
-            self._sub_debounce = self.root.after(200, lambda: self.apply_preview_subtitles(force_reload=True))
-
-        # --- 폰트 이름 (커스텀 피커 연동) ---
-        self._sub_font_name = tk.StringVar(value='맑은 고딕')
-        class _FontProxy:
-            def __init__(self, var): self._var = var
-            def get(self): return self._var.get()
-            def set(self, v): self._var.set(v)
-        self.sub_font = _FontProxy(self._sub_font_name)
-        
-        r = _st_row('🔤 폰트 이름')
-        self._font_btn = tk.Button(r, text='맑은 고딕 ▼', bg=C['bg3'], fg=C['text'], font=('맑은 고딕', 10), relief=tk.FLAT, command=self._open_font_picker, width=20, cursor='hand2')
-        self._font_btn.pack(side=tk.LEFT)
-        self._sub_font_name.trace_add('write', lambda *_: [self._font_btn.config(text=f"{self._sub_font_name.get()} ▼", font=(self._sub_font_name.get(), 10)), _update_sub()])
-
-        # --- 폰트 크기 ---
-        self.sub_font_size = tk.IntVar(value=80)
-        r = _st_row('📏 폰트 크기')
-        tk.Scale(r, from_=10, to=200, orient=tk.HORIZONTAL, variable=self.sub_font_size, length=280, bg=C['bg'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.LEFT)
-        self.sub_font_size.trace_add('write', _update_sub)
-
-        # --- 글자 색상 ---
-        self.sub_color_f = tk.StringVar(value='#FFFFFF')
-        r = _st_row('🎨 글자 색상')
-        def _pick_f():
-            c = tk.colorchooser.askcolor(initialcolor=self.sub_color_f.get())[1]
-            if c: self.sub_color_f.set(c); _update_sub()
-        tk.Button(r, text=' 색상 선택 ', command=_pick_f, bg=C['bg3'], fg=C['text'], relief='flat', padx=12, pady=2, font=_f, cursor='hand2').pack(side=tk.LEFT)
-        tk.Label(r, textvariable=self.sub_color_f, bg=C['bg'], fg=C['text2'], font=_f).pack(side=tk.LEFT, padx=15)
-
-        # --- 테두리 두께 ---
-        self.sub_outline = tk.IntVar(value=3)
-        r = _st_row('〰️ 테두리 두께')
-        tk.Scale(r, from_=0, to=15, orient=tk.HORIZONTAL, variable=self.sub_outline, length=280, bg=C['bg'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.LEFT)
-        self.sub_outline.trace_add('write', _update_sub)
-
-        # --- 테두리 색상 ---
-        self.sub_color_o = tk.StringVar(value='#000000')
-        r = _st_row('🎨 테두리 색상')
-        def _pick_o():
-            c = tk.colorchooser.askcolor(initialcolor=self.sub_color_o.get())[1]
-            if c: self.sub_color_o.set(c); _update_sub()
-        tk.Button(r, text=' 색상 선택 ', command=_pick_o, bg=C['bg3'], fg=C['text'], relief='flat', padx=12, pady=2, font=_f, cursor='hand2').pack(side=tk.LEFT)
-        tk.Label(r, textvariable=self.sub_color_o, bg=C['bg'], fg=C['text2'], font=_f).pack(side=tk.LEFT, padx=15)
-
-        # --- 그림자 깊이 ---
-        self.sub_shadow = tk.IntVar(value=3)
-        r = _st_row('👥 그림자 깊이')
-        tk.Scale(r, from_=0, to=15, orient=tk.HORIZONTAL, variable=self.sub_shadow, length=280, bg=C['bg'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.LEFT)
-        self.sub_shadow.trace_add('write', _update_sub)
-
-        # --- 그림자 색상 ---
-        self.sub_color_s = tk.StringVar(value='#000000')
-        r = _st_row('🎨 그림자 색상')
-        def _pick_s():
-            c = tk.colorchooser.askcolor(initialcolor=self.sub_color_s.get())[1]
-            if c: self.sub_color_s.set(c); _update_sub()
-        tk.Button(r, text=' 색상 선택 ', command=_pick_s, bg=C['bg3'], fg=C['text'], relief='flat', padx=12, pady=2, font=_f, cursor='hand2').pack(side=tk.LEFT)
-        tk.Label(r, textvariable=self.sub_color_s, bg=C['bg'], fg=C['text2'], font=_f).pack(side=tk.LEFT, padx=15)
-
-        # --- 자막 위치(Y) ---
-        self.sub_y_pos = tk.IntVar(value=50)
-        r = _st_row('📍 자막 위치(Y)')
-        tk.Scale(r, from_=0, to=400, orient=tk.HORIZONTAL, variable=self.sub_y_pos, length=280, bg=C['bg'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.LEFT)
-        self.sub_y_pos.trace_add('write', _update_sub)
-
         # ── 카드 4: 내보내기 ──
         c4 = _card(insp_inner, '📤  내보내기')
         r = _row(c4); tk.Label(r, text='포맷', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
@@ -397,41 +377,40 @@ class CustomModelApp:
         self.tree.bind('<ButtonRelease-1>', self.on_tree_click)
         self.tree.bind('<Button-3>', self.show_context_menu)
 
-        # [Apple HIG] PanedWindow 핸들 시각화 (Vrew 스타일)
-        self._add_sash_handle(self.main_paned, 'h')
-        self._add_sash_handle(self.v_paned, 'v')
-
         # [Ctrl+휠] 자막 시작/종료 시간 ±50ms 미세 조정 (Apple HIG)
         def _on_ctrl_wheel(e):
-            if not (e.state & 0x4): return # Ctrl 안 눌림 -> 기본 스크롤 허용
-            
-            # [사용자 요청] Ctrl 눌린 경우, 시간 조절 가능 영역이 아니더라도 스크롤 차단
+            if not (e.state & 0x4): return
             item = self.tree.identify_row(e.y)
             col = self.tree.identify_column(e.x)
-            if item and col in ('#2', '#3'):
-                try:
-                    idx = int(self.tree.item(item)['values'][0]) - 1
-                    if 0 <= idx < len(self.results_data):
-                        # 휠 방향 반전: 위로(delta>0) 올리면 시간 감소(-), 아래로(delta<0) 내리면 시간 증가(+)
-                        delta = -0.1 if e.delta > 0 else 0.1
-                        key = 's' if col == '#2' else 'e'
-                        nv = max(0, self.results_data[idx][key] + delta)
-                        
-                        # 안전장치 및 차단 로직
-                        valid = True
-                        if key == 's':
-                            if nv >= self.results_data[idx]['e'] or (idx > 0 and nv < self.results_data[idx-1]['e']): valid = False
-                        else: # key == 'e'
-                            if nv <= self.results_data[idx]['s'] or (idx < len(self.results_data)-1 and nv > self.results_data[idx+1]['s']): valid = False
-                        
-                        if valid:
-                            self.results_data[idx][key] = round(nv, 3)
-                            self.tree.set(item, column=col, value=self.format_time(nv))
-                            self.player.set_time(int(nv * 1000))
-                            self.player.play()
-                            self.apply_preview_subtitles(force_reload=True)
-                except: pass
-            return 'break' # Ctrl 눌린 상태에선 조절 성공 여부와 무관하게 스크롤 방지
+            if not item or col not in ('#2', '#3'): return
+            try:
+                idx = int(self.tree.item(item)['values'][0]) - 1
+                if idx < 0 or idx >= len(self.results_data): return
+                
+                # [사용자 요청] 휠 방향 반전: 위로(delta>0) 올리면 시간 감소(-), 아래로(delta<0) 내리면 시간 증가(+)
+                delta = -0.1 if e.delta > 0 else 0.1
+                
+                key = 's' if col == '#2' else 'e'
+                nv = max(0, self.results_data[idx][key] + delta)
+                
+                # [안전장치] 자막 간 겹침 방지 및 시작 < 종료 유지
+                if key == 's':
+                    if nv >= self.results_data[idx]['e']: return
+                    if idx > 0 and nv < self.results_data[idx-1]['e']: return # 앞 대사 침범 방지
+                else: # key == 'e'
+                    if nv <= self.results_data[idx]['s']: return
+                    if idx < len(self.results_data)-1 and nv > self.results_data[idx+1]['s']: return # 뒤 대사 침범 방지
+                
+                self.results_data[idx][key] = round(nv, 3)
+                self.tree.set(item, column=col, value=self.format_time(nv))
+                
+                # [사용자 요청] 시간 조정 후 즉시 해당 위치에서 재생 시작
+                self.player.set_time(int(nv * 1000))
+                self.player.play()
+                
+                self.apply_preview_subtitles(force_reload=True)
+            except: pass
+            return 'break'
         self.tree.bind('<MouseWheel>', _on_ctrl_wheel)
 
 
@@ -456,7 +435,7 @@ class CustomModelApp:
         
         # 검색 입력창
         search_var = tk.StringVar()
-        search_entry = tk.Entry(popup, textvariable=search_var, font=('Noto Sans KR', 11), bg=self.C['bg2'], fg=self.C['text'], insertbackground=self.C['text'], relief=tk.FLAT)
+        search_entry = tk.Entry(popup, textvariable=search_var, font=('Segoe UI Variable Display', 11), bg=self.C['bg2'], fg=self.C['text'], insertbackground=self.C['text'], relief=tk.FLAT)
         search_entry.pack(fill=tk.X, padx=14, pady=(14, 8))
         search_entry.focus_set()
         
@@ -502,22 +481,21 @@ class CustomModelApp:
 
     def bind_keys(self):
         def _is_editing():
-            """현재 포커스가 텍스트 편집 위젯에 있으면 True (키 이벤트 차단)"""
             w = self.root.focus_get()
             return isinstance(w, (tk.Entry, tk.Text))
 
         def _on_space(e):
-            if _is_editing(): return  # 편집 중엔 스페이스바를 위젯에 넘김
+            if _is_editing(): return
             self.toggle_play()
             return "break"
 
         def _on_left(e):
-            if _is_editing(): return  # 편집 중엔 좌방향키를 위젯에 넘김
+            if _is_editing(): return
             self.skip_time(-5000)
             return "break"
 
         def _on_right(e):
-            if _is_editing(): return  # 편집 중엔 우방향키를 위젯에 넘김
+            if _is_editing(): return
             self.skip_time(5000)
             return "break"
 
@@ -525,7 +503,6 @@ class CustomModelApp:
         self.root.bind_all("<Left>",  _on_left)
         self.root.bind_all("<Right>", _on_right)
 
-        # [사용자 요청] 탭이나 리스트에 포커스가 있을 때 방향키로 메뉴가 넘어가는 Tkinter 기본 동작 차단
         try:
             self.root.unbind_class('TNotebook', '<Left>')
             self.root.unbind_class('TNotebook', '<Right>')
@@ -869,83 +846,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 self.player.set_position(pos)
                 self.seek_var.set(pos * 1000)
         except: pass
-
-
     def update_loop(self):
         if self.player:
             if not self.is_seeking:
                 pos = self.player.get_position()
                 if pos >= 0: self.seek_var.set(pos * 1000)
-            curr_ms = self.player.get_time()
-            total_ms = self.player.get_length()
-            
+            curr_ms, total_ms = self.player.get_time(), self.player.get_length()
             if curr_ms >= 0 and total_ms > 0:
                 c_m, c_s = divmod(int(curr_ms/1000), 60); t_m, t_s = divmod(int(total_ms/1000), 60); self.lbl_time.config(text=f"{c_m:02d}:{c_s:02d} / {t_m:02d}:{t_s:02d}")
-                
-                # [사용자 요청] 현재 재생 중인 자막 찾기 및 강조
-                curr_sec = curr_ms / 1000.0
-                active_idx = -1
-                for i, r in enumerate(self.results_data):
-                    if r['s'] <= curr_sec <= r['e']:
-                        active_idx = i
-                        break
-                
-                if hasattr(self, '_last_active_idx') and self._last_active_idx != active_idx:
-                    current_tab = self.notebook.index(self.notebook.select())
-                    
-                    # Treeview 강조
-                    for item in self.tree.get_children():
-                        val = self.tree.item(item)['values']
-                        if val and int(val[0]) - 1 == active_idx:
-                            self.tree.item(item, tags=('active',))
-                            if current_tab == 0: self.tree.see(item) # 자막 리스트 탭일 때만 스크롤
-                        else:
-                            self.tree.item(item, tags=())
-                    
-                    # 단어 블록 강조 (스크롤은 내부 메서드에서 탭 확인 후 수행)
-                    self.block_editor.set_active_row(active_idx, follow= (current_tab == 1))
-                    self._last_active_idx = active_idx
-                elif not hasattr(self, '_last_active_idx'):
-                    self._last_active_idx = -2 # 초기화
-
             if hasattr(self, 'btn_play'): self.btn_play.config(text=self.ICON_PAUSE if self.player.is_playing() else self.ICON_PLAY)
-        
-        # 실시간성 향상을 위해 100ms 주기로 변경
-        self.root.after(100, self.update_loop)
-    def _add_sash_handle(self, paned, orient='h'):
-        """PanedWindow의 Sash 위치에 마우스 호버 시 반응하는 시각적 핸들(Pill)을 추가"""
-        C = self.C
-        # 핸들 프레임 생성 (Pill 모양 모사)
-        if orient == 'h':
-            handle = tk.Frame(paned, bg=C['border'], width=4, height=40, cursor="sb_h_double_arrow")
-        else:
-            handle = tk.Frame(paned, bg=C['border'], width=40, height=4, cursor="sb_v_double_arrow")
-        
-        def _on_enter(e): handle.config(bg=C['accent'])
-        def _on_leave(e): handle.config(bg=C['border'])
-        handle.bind("<Enter>", _on_enter)
-        handle.bind("<Leave>", _on_leave)
-        
-        # 드래그 중에도 핸들이 Sash를 따라다니도록 실시간 추적
-        def _sync_position():
-            try:
-                if not paned.winfo_exists(): return
-                # PanedWindow에 위젯이 2개 이상 추가되어 Sash가 생성된 경우에만 작동
-                if paned.count() > 1:
-                    coords = paned.sash_coord(0)
-                    if orient == 'h':
-                        # 수직 핸들을 Sash 중앙에 배치
-                        ph = paned.winfo_height()
-                        handle.place(x=coords[0] + 1, y=(ph - 40) // 2)
-                    else:
-                        # 수평 핸들을 Sash 중앙에 배치
-                        pw = paned.winfo_width()
-                        handle.place(x=(pw - 40) // 2, y=coords[1] + 1)
-                self.root.after(100, _sync_position)
-            except: pass
-        
-        _sync_position()
-
+        self.root.after(500, self.update_loop)
     def export_subtitles(self):
         if not self.results_data: return
         fmt = self.export_format.get(); ext = "." + fmt.lower(); initial = os.path.splitext(os.path.basename(self.current_video_path))[0]; file_path = filedialog.asksaveasfilename(defaultextension=ext, initialfile=initial, filetypes=[(fmt, "*" + ext)])
