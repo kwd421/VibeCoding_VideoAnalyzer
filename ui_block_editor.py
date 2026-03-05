@@ -17,7 +17,14 @@ class UIBlockEditor:
         self.player = player
         self.on_tree_rebuild_request = on_tree_rebuild_request
         
-        self.block_canvas = tk.Canvas(parent, bg="#2c3e50", highlightthickness=0)
+        # [Apple 디자인] 블록 에디터 색상 팔레트
+        self.BC = {
+            'bg': '#1c1c1e', 'row': '#2c2c2e', 'row_alt': '#252528',
+            'word_bg': '#0a84ff', 'word_fg': '#ffffff', 'word_border': '#3a9bff',
+            'idx': '#636366', 'time_s': '#64d2ff', 'time_e': '#ff9f0a', 'sep': '#48484a',
+        }
+        
+        self.block_canvas = tk.Canvas(parent, bg=self.BC['bg'], highlightthickness=0)
         self.block_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sc = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=self.block_canvas.yview)
         sc.pack(side=tk.RIGHT, fill=tk.Y)
@@ -32,12 +39,12 @@ class UIBlockEditor:
         self.parent.bind("<Leave>", lambda e: self.block_canvas.unbind_all("<MouseWheel>"))
         self.block_canvas.bind("<Button-3>", self.on_block_right_click)
 
-        self.block_menu = tk.Menu(self.root, tearoff=0)
-        self.block_menu.add_command(label="[분리] 현재 단어부터 다음 줄로 나누기", command=self.split_word_block)
+        self.block_menu = tk.Menu(self.root, tearoff=0, bg='#2c2c2e', fg='#f5f5f7', activebackground='#0a84ff', activeforeground='white', font=('Segoe UI', 9))
+        self.block_menu.add_command(label="분리: 현재 단어부터 다음 줄로 나누기", command=self.split_word_block)
         
-        self.row_menu = tk.Menu(self.root, tearoff=0)
-        self.row_menu.add_command(label="[병합] 위 대사와 합치기", command=lambda: self.merge_row_block(-1))
-        self.row_menu.add_command(label="[병합] 아래 대사와 합치기", command=lambda: self.merge_row_block(1))
+        self.row_menu = tk.Menu(self.root, tearoff=0, bg='#2c2c2e', fg='#f5f5f7', activebackground='#0a84ff', activeforeground='white', font=('Segoe UI', 9))
+        self.row_menu.add_command(label="병합: 위 대사와 합치기", command=lambda: self.merge_row_block(-1))
+        self.row_menu.add_command(label="병합: 아래 대사와 합치기", command=lambda: self.merge_row_block(1))
 
         self.drag_data = {"items": [], "idx": -1, "w_idx": -1, "start_x": 0, "start_y": 0}
         self.row_y_map = []
@@ -129,25 +136,27 @@ class UIBlockEditor:
     def render_block_view(self):
         if not hasattr(self, 'block_canvas') or not self.block_canvas.winfo_exists(): return
         self.block_canvas.delete("all")
-        y_offset = 15
+        y_offset = 12
         self.row_y_map = []
         results_data = self.transcript_manager.get_all()
+        BC = self.BC
         
         for idx, r in enumerate(results_data):
-            row_id = self.block_canvas.create_rectangle(10, y_offset, 2500, y_offset + 35, fill="#34495e", outline="", tags=f"row_{idx}")
+            row_color = BC['row'] if idx % 2 == 0 else BC['row_alt']
+            row_id = self.block_canvas.create_rectangle(8, y_offset, 2500, y_offset + 36, fill=row_color, outline="", tags=f"row_{idx}")
             self.block_canvas.tag_lower(row_id)
             
-            self.block_canvas.create_text(20, y_offset + 17, text=f"[{idx+1}]", fill="#bdc3c7", anchor=tk.W, font=("", 9))
+            self.block_canvas.create_text(20, y_offset + 18, text=f"{idx+1}", fill=BC['idx'], anchor=tk.W, font=("Segoe UI", 8))
             
-            start_txt = self.block_canvas.create_text(50, y_offset + 17, text=self.format_time(r.get('s',0)), fill="#3498db", anchor=tk.W, font=("", 9, "underline"))
+            start_txt = self.block_canvas.create_text(48, y_offset + 18, text=self.format_time(r.get('s',0)), fill=BC['time_s'], anchor=tk.W, font=("Segoe UI", 9))
             self.block_canvas.tag_bind(start_txt, "<Button-1>", lambda e, s=r.get('s',0): self.player.set_time(int(s * 1000)))
             
-            self.block_canvas.create_text(100, y_offset + 17, text="-", fill="#ecf0f1", anchor=tk.W, font=("", 9))
+            self.block_canvas.create_text(100, y_offset + 18, text="→", fill=BC['sep'], anchor=tk.W, font=("Segoe UI", 9))
             
-            end_txt = self.block_canvas.create_text(115, y_offset + 17, text=self.format_time(r.get('e',0)), fill="#e74c3c", anchor=tk.W, font=("", 9, "underline"))
+            end_txt = self.block_canvas.create_text(115, y_offset + 18, text=self.format_time(r.get('e',0)), fill=BC['time_e'], anchor=tk.W, font=("Segoe UI", 9))
             self.block_canvas.tag_bind(end_txt, "<Button-1>", lambda e, s=r.get('e',0): self.player.set_time(int(s * 1000)))
             
-            x_offset = 180
+            x_offset = 175
             words = r.get('words', [])
             
             refined_words = []
@@ -173,17 +182,17 @@ class UIBlockEditor:
 
             for w_idx, w_obj in enumerate(words):
                 text = w_obj['word']
-                text_id = self.block_canvas.create_text(x_offset + 10, y_offset + 17, text=text, fill="#2c3e50", anchor=tk.W, font=("", 10, "bold"))
+                text_id = self.block_canvas.create_text(x_offset + 10, y_offset + 18, text=text, fill=BC['word_fg'], anchor=tk.W, font=("Segoe UI", 10, "bold"))
                 bbox = self.block_canvas.bbox(text_id)
                 if bbox:
-                    w_width = bbox[2] - bbox[0] + 20
-                    rect_id = self.block_canvas.create_rectangle(x_offset, y_offset + 3, x_offset + w_width, y_offset + 32, fill="#f1c40f", outline="#e67e22", width=2, tags=("word_block", f"{idx}_{w_idx}"))
+                    w_width = bbox[2] - bbox[0] + 18
+                    rect_id = self.block_canvas.create_rectangle(x_offset, y_offset + 4, x_offset + w_width, y_offset + 32, fill=BC['word_bg'], outline=BC['word_border'], width=1, tags=("word_block", f"{idx}_{w_idx}"))
                     self.block_canvas.tag_lower(rect_id, text_id)
                     self.block_canvas.addtag_withtag(f"{idx}_{w_idx}", text_id)
-                    x_offset += w_width + 8
+                    x_offset += w_width + 6
             
-            self.row_y_map.append({'idx': idx, 'y_start': y_offset, 'y_end': y_offset + 35})
-            y_offset += 45
+            self.row_y_map.append({'idx': idx, 'y_start': y_offset, 'y_end': y_offset + 36})
+            y_offset += 44
             
         self.block_canvas.configure(scrollregion=(0, 0, 2500, y_offset + 20))
 

@@ -3,7 +3,7 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, ttk, font as tkfont
 import numpy as np
 import vlc
 from engine_core import HyperTranscriptionEngine
@@ -27,8 +27,62 @@ class CustomModelApp:
             self.transcript_manager.clear()
     def __init__(self, root):
         self.root = root
-        self.root.title("VAD AI Studio v25 (Vision Integrated)")
+        self.root.title("VAD AI Studio v26")
         self.root.geometry("1300x850")
+        self.root.configure(bg="#1c1c1e")
+        
+        # [Apple 디자인 시스템] 글로벌 색상 팔레트
+        self.C = {
+            'bg':       '#1c1c1e',  # 배경 (System Background)
+            'bg2':      '#2c2c2e',  # 2차 배경 (Secondary)
+            'bg3':      '#3a3a3c',  # 3차 배경 (Tertiary)
+            'surface':  '#48484a',  # 표면 (Surface)
+            'border':   '#545456',  # 테두리
+            'text':     '#f5f5f7',  # 기본 텍스트
+            'text2':    '#98989d',  # 보조 텍스트
+            'accent':   '#0a84ff',  # 액센트 블루
+            'green':    '#30d158',  # 성공/완료
+            'red':      '#ff453a',  # 경고/삭제
+            'orange':   '#ff9f0a',  # 주의
+            'purple':   '#bf5af2',  # 보라
+            'teal':     '#64d2ff',  # 정보
+        }
+        C = self.C
+        
+        # [Apple 디자인] ttk 스타일 테마 구축
+        style = ttk.Style()
+        style.theme_use('clam')
+        
+        _font = ('Segoe UI', 10)
+        _font_s = ('Segoe UI', 9)
+        _font_h = ('Segoe UI', 11, 'bold')
+        
+        style.configure('.', background=C['bg2'], foreground=C['text'], font=_font, borderwidth=0)
+        style.configure('TFrame', background=C['bg2'])
+        style.configure('TLabel', background=C['bg2'], foreground=C['text'], font=_font)
+        style.configure('TLabelframe', background=C['bg2'], foreground=C['text'], font=_font_h)
+        style.configure('TLabelframe.Label', background=C['bg2'], foreground=C['accent'], font=_font_h)
+        
+        style.configure('Treeview', background=C['bg'], foreground=C['text'], fieldbackground=C['bg'],
+                         rowheight=28, font=_font_s, borderwidth=0)
+        style.configure('Treeview.Heading', background=C['bg3'], foreground=C['text2'],
+                         font=('Segoe UI', 9, 'bold'), borderwidth=0, relief='flat')
+        style.map('Treeview', background=[('selected', C['accent'])], foreground=[('selected', '#ffffff')])
+        style.map('Treeview.Heading', background=[('active', C['surface'])])
+        
+        style.configure('TNotebook', background=C['bg'], borderwidth=0)
+        style.configure('TNotebook.Tab', background=C['bg3'], foreground=C['text2'],
+                         font=_font_s, padding=[12, 6], borderwidth=0)
+        style.map('TNotebook.Tab', background=[('selected', C['accent'])], foreground=[('selected', '#ffffff')])
+        
+        style.configure('TCombobox', fieldbackground=C['bg3'], background=C['surface'],
+                         foreground=C['text'], arrowcolor=C['text2'], borderwidth=1)
+        style.map('TCombobox', fieldbackground=[('readonly', C['bg3'])], foreground=[('readonly', C['text'])])
+        
+        style.configure('Horizontal.TProgressbar', troughcolor=C['bg3'], background=C['accent'],
+                         borderwidth=0, thickness=6)
+        style.configure('TScrollbar', background=C['bg3'], troughcolor=C['bg'], borderwidth=0, arrowcolor=C['text2'])
+        
         self.engine = HyperTranscriptionEngine()
         self.video_editor = VideoEditor()
         self.player = None
@@ -61,7 +115,7 @@ class CustomModelApp:
         self.tree.insert("", "end", values=(task["i"], self.format_time(task['s']), self.format_time(task['e']), task['t']))
         
     def _on_complete(self, task):
-        self.lbl_status.config(text=task["text"], fg="#27ae60"); self.progress_var.set(100)
+        self.lbl_status.config(text=task["text"], fg=self.C['green']); self.progress_var.set(100)
         self.btn_analyze.config(state=tk.NORMAL)
         if task.get("is_vad"): 
             self.save_frame.pack(fill=tk.X, pady=5, before=self.lbl_status)
@@ -71,60 +125,150 @@ class CustomModelApp:
         self.btn_stop.config(state=tk.DISABLED)
 
     def setup_ui(self):
-        self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashrelief=tk.RAISED, sashwidth=6)
+        C = self.C
+        self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashrelief=tk.FLAT, sashwidth=4, bg=C['border'])
         self.main_paned.pack(fill=tk.BOTH, expand=True)
 
-        left_f = tk.Frame(self.main_paned, bg="#1a1a1a")
+        left_f = tk.Frame(self.main_paned, bg=C['bg'])
         self.main_paned.add(left_f, minsize=400, width=500)
 
-        self.video_canvas = tk.Frame(left_f, bg="black")
-        self.video_canvas.pack(fill=tk.BOTH, expand=True, padx=5, pady=(2, 5))
+        self._video_aspect = 9 / 16  # 기본 16:9 비율 (h/w)
+        self.video_canvas = tk.Frame(left_f, bg="black", height=281, width=500)
+        self.video_canvas.pack_propagate(False)
+        self.video_canvas.pack(fill=tk.X, padx=5, pady=(2, 5))
         self.video_canvas.bind("<Button-1>", lambda e: self.toggle_play())
+        
+        # [시니어 최적화] 패널 폭 변경 시 영상 비율 유지하며 높이를 동적으로 재계산
+        def _on_canvas_resize(e):
+            new_w = e.width
+            if new_w > 10:
+                new_h = int(new_w * self._video_aspect)
+                if new_h > 10 and abs(new_h - self.video_canvas.winfo_height()) > 5:
+                    self.video_canvas.config(height=new_h)
+        self.video_canvas.bind("<Configure>", _on_canvas_resize)
 
         self.seek_var = tk.DoubleVar()
-        self.seek_bar = tk.Scale(left_f, from_=0, to=1000, orient=tk.HORIZONTAL, variable=self.seek_var, showvalue=0, bg="#1a1a1a")
+        self.seek_bar = tk.Scale(left_f, from_=0, to=1000, orient=tk.HORIZONTAL, variable=self.seek_var, showvalue=0, bg=C['bg'], highlightthickness=0, troughcolor=C['bg3'], fg=C['accent'], sliderrelief=tk.FLAT)
         self.seek_bar.pack(fill=tk.X, padx=10, pady=2)
         self.seek_bar.bind("<ButtonPress-1>", self.on_seek_start)
         self.seek_bar.bind("<ButtonRelease-1>", self.on_seek_release)
         self.seek_bar.bind("<B1-Motion>", self.on_seek_motion)
 
-        ctrl = tk.Frame(left_f, bg="#2d2d2d", pady=10)
+        ctrl = tk.Frame(left_f, bg=C['bg2'], pady=8)
         ctrl.pack(fill=tk.X)
         
-        bg_f = tk.Frame(ctrl, bg="#2d2d2d")
+        bg_f = tk.Frame(ctrl, bg=C['bg2'])
         bg_f.pack(expand=True)
         
-        tk.Button(bg_f, text=chr(9194)+" 5s", command=lambda: self.skip_time(-5000), bg="#444", fg="white", width=8).pack(side=tk.LEFT, padx=10)
-        self.btn_play = tk.Button(bg_f, text=self.ICON_PLAY, command=self.toggle_play, width=8, bg="#27ae60", fg="white")
-        self.btn_play.pack(side=tk.LEFT, padx=10)
-        tk.Button(bg_f, text="5s "+chr(9193), command=lambda: self.skip_time(5000), bg="#444", fg="white", width=8).pack(side=tk.LEFT, padx=10)
+        _btn_cfg = dict(font=('Segoe UI', 9), relief=tk.FLAT, bd=0, padx=8, pady=4)
+        tk.Button(bg_f, text=chr(9194)+" 5s", command=lambda: self.skip_time(-5000), bg=C['bg3'], fg=C['text'], width=8, **_btn_cfg).pack(side=tk.LEFT, padx=6)
+        self.btn_play = tk.Button(bg_f, text=self.ICON_PLAY, command=self.toggle_play, width=8, bg=C['accent'], fg='white', **_btn_cfg)
+        self.btn_play.pack(side=tk.LEFT, padx=6)
+        tk.Button(bg_f, text="5s "+chr(9193), command=lambda: self.skip_time(5000), bg=C['bg3'], fg=C['text'], width=8, **_btn_cfg).pack(side=tk.LEFT, padx=6)
 
-        self.lbl_time = tk.Label(ctrl, text="00:00 / 00:00", bg="#2d2d2d", fg="white")
+        self.lbl_time = tk.Label(ctrl, text="00:00 / 00:00", bg=C['bg2'], fg=C['text2'], font=('Segoe UI', 9))
         self.lbl_time.pack(side=tk.RIGHT, padx=20)
-        right_f = tk.Frame(self.main_paned, padx=15); self.main_paned.add(right_f, minsize=600, width=800)
-        af = tk.LabelFrame(right_f, text=" 분석 및 편집 설정 ", padx=10, pady=10); af.pack(fill=tk.X, pady=10)
-        tk.Button(af, text="영상 파일 선택", command=self.on_select_video, bg="#34495e", fg="white", font=("bold")).pack(fill=tk.X, pady=5)
-        model_f = tk.Frame(af); model_f.pack(fill=tk.X, pady=5)
-        tk.Label(model_f, text="AI 모델:").pack(side=tk.LEFT)
+        
+        # --- 자막 렌더링 설정 ---
+        sub_f = tk.LabelFrame(left_f, text=" 자막 디자인 ", bg=C['bg2'], fg=C['accent'], padx=10, pady=5, font=('Segoe UI', 10, 'bold'))
+        sub_f.pack(fill=tk.X, padx=10, pady=5)
+        
+        def _pick_c(var, btn, title):
+            from tkinter import colorchooser
+            c = colorchooser.askcolor(title=title, color=var.get())[1]
+            if c:
+                var.set(c)
+                r, g, b = int(c[1:3],16), int(c[3:5],16), int(c[5:7],16)
+                luma = r*0.299 + g*0.587 + b*0.114
+                fg_col = "black" if luma > 128 else "white"
+                btn.config(bg=c, fg=fg_col, text=f"■ {title}")
+            
+        r1 = tk.Frame(sub_f, bg=C['bg2']); r1.pack(fill=tk.X, pady=2)
+        tk.Label(r1, text="폰트:", bg=C['bg2'], fg=C['text'], font=('Segoe UI', 9)).pack(side=tk.LEFT)
+        
+        # [ASS 핫스왓] 커스텀 폰트 피커 (시스템 폰트 전체 + 검색 + 자체 프리뷰)
+        self._sub_font_name = tk.StringVar(value="맑은 고딕")
+        self._font_btn = tk.Button(r1, text="맑은 고딕 ▼", bg=C['bg3'], fg=C['text'], font=("맑은 고딕", 9), relief=tk.FLAT, command=self._open_font_picker, width=14)
+        self._font_btn.pack(side=tk.LEFT, padx=(2, 10))
+        # sub_font 호환성 래퍼
+        class _FontProxy:
+            def __init__(self, var): self._var = var
+            def get(self): return self._var.get()
+            def set(self, v): self._var.set(v)
+        self.sub_font = _FontProxy(self._sub_font_name)
+        self._sub_font_name.trace_add("write", lambda *_: self._font_btn.config(text=f"{self._sub_font_name.get()} ▼", font=(self._sub_font_name.get(), 9)))
+        tk.Label(r1, text="폰트 크기:", bg=C['bg2'], fg=C['text'], font=('Segoe UI', 9)).pack(side=tk.LEFT)
+        self.sub_font_size = tk.IntVar(value=80)
+        ttk.Combobox(r1, textvariable=self.sub_font_size, values=[50,55,60,65,70,75,80,85,90,95,100,105,110,115,120,125,130,135,140,145,150], width=3, state="readonly").pack(side=tk.LEFT, padx=(2, 10))
+        tk.Label(r1, text="자막 상하 위치:", bg=C['bg2'], fg=C['text'], font=('Segoe UI', 9)).pack(side=tk.LEFT)
+        self.sub_y_pos = tk.IntVar(value=50)
+        tk.Scale(r1, from_=0, to=300, variable=self.sub_y_pos, orient=tk.HORIZONTAL, showvalue=0, bg=C['bg2'], highlightthickness=0, troughcolor=C['bg3'], fg=C['accent'], sliderrelief=tk.FLAT, length=80).pack(side=tk.LEFT)
+        
+        r2 = tk.Frame(sub_f, bg=C['bg2']); r2.pack(fill=tk.X, pady=4)
+        self.sub_color_f = tk.StringVar(value="#ffffff")
+        btn_cf = tk.Button(r2, text="■ 글자색", bg="#ffffff", fg="black", font=('Segoe UI', 9), relief=tk.FLAT, command=lambda: _pick_c(self.sub_color_f, btn_cf, "글자색"))
+        btn_cf.pack(side=tk.LEFT, padx=(0, 10))
+        
+        tk.Label(r2, text="윤곽선:", bg=C['bg2'], fg=C['text'], font=('Segoe UI', 9)).pack(side=tk.LEFT)
+        self.sub_outline = tk.IntVar(value=3)
+        ttk.Combobox(r2, textvariable=self.sub_outline, values=[0,1,2,3,4,5,6,8,10], width=2, state="readonly").pack(side=tk.LEFT, padx=2)
+        self.sub_color_o = tk.StringVar(value="#000000")
+        btn_co = tk.Button(r2, text="■ 윤곽색", bg="#000000", fg="white", font=('Segoe UI', 9), relief=tk.FLAT, command=lambda: _pick_c(self.sub_color_o, btn_co, "윤곽색"))
+        btn_co.pack(side=tk.LEFT, padx=(5, 10))
+        
+        tk.Label(r2, text="이중윤곽선:", bg=C['bg2'], fg=C['text'], font=('Segoe UI', 9)).pack(side=tk.LEFT)
+        self.sub_shadow = tk.IntVar(value=3)
+        ttk.Combobox(r2, textvariable=self.sub_shadow, values=[0,1,2,3,4,5,6,8,10], width=2, state="readonly").pack(side=tk.LEFT, padx=2)
+        self.sub_color_s = tk.StringVar(value="#000000")
+        btn_cs = tk.Button(r2, text="■ 이중윤곽색", bg="#000000", fg="white", font=("bold", 9), relief=tk.FLAT, command=lambda: _pick_c(self.sub_color_s, btn_cs, "이중윤곽색"))
+        btn_cs.pack(side=tk.LEFT, padx=5)
+        
+        # [ASS 핫스왑] 모든 자막 디자인 위젯 변경 시 디바운스로 자동 적용 (CPU 부하 ≈ 0%)
+        self._sub_debounce = None
+        self._pos_debounce = None
+        def _schedule_sub_update(*_):
+            if self._sub_debounce: self.root.after_cancel(self._sub_debounce)
+            self._sub_debounce = self.root.after(300, self.apply_vlc_sub_settings)
+        def _schedule_pos_update(*_):
+            if self._pos_debounce: self.root.after_cancel(self._pos_debounce)
+            self._pos_debounce = self.root.after(50, self.apply_vlc_sub_settings)
+        
+        # IntVar / StringVar 트레이스
+        self.sub_font_size.trace_add("write", _schedule_sub_update)
+        self.sub_y_pos.trace_add("write", _schedule_pos_update)  # 위치는 50ms 디바운스로 실시간 반영
+        self.sub_outline.trace_add("write", _schedule_sub_update)
+        self.sub_shadow.trace_add("write", _schedule_sub_update)
+        self.sub_color_f.trace_add("write", _schedule_sub_update)
+        self.sub_color_o.trace_add("write", _schedule_sub_update)
+        self.sub_color_s.trace_add("write", _schedule_sub_update)
+        # 폰트 이름 변경 트레이스
+        self._sub_font_name.trace_add("write", _schedule_sub_update)
+        # -----------------------------
+
+        right_f = tk.Frame(self.main_paned, padx=15, bg=C['bg']); self.main_paned.add(right_f, minsize=600, width=800)
+        af = tk.LabelFrame(right_f, text=" 분석 및 편집 ", padx=10, pady=10, bg=C['bg2'], fg=C['accent'], font=('Segoe UI', 10, 'bold')); af.pack(fill=tk.X, pady=10)
+        tk.Button(af, text="영상 파일 선택", command=self.on_select_video, bg=C['bg3'], fg=C['text'], font=('Segoe UI', 10), relief=tk.FLAT, pady=6).pack(fill=tk.X, pady=5)
+        model_f = tk.Frame(af, bg=C['bg2']); model_f.pack(fill=tk.X, pady=5)
+        tk.Label(model_f, text="AI 모델:", bg=C['bg2'], fg=C['text'], font=('Segoe UI', 9)).pack(side=tk.LEFT)
         self.ai_model_var = tk.StringVar(value="large-v3-turbo (기본)")
         self.ai_model_combo = ttk.Combobox(model_f, textvariable=self.ai_model_var, values=["large-v3-turbo (기본)", "models/whisper-medium-ko-zeroth (Medium-Zeroth)"], state="readonly", width=60)
         self.ai_model_combo.pack(side=tk.LEFT, padx=5)
         self.ai_model_var.trace_add("write", lambda *args: self.reset_action_button())
-        mf = tk.Frame(af); mf.pack(fill=tk.X)
+        mf = tk.Frame(af, bg=C['bg2']); mf.pack(fill=tk.X)
         self.mode_var = tk.StringVar(value="대사 변환 및 컷편집 (종합)")
         self.mode_combo = ttk.Combobox(mf, textvariable=self.mode_var, values=["자연어-대사 변환", "대사 변환 및 컷편집", "깜놀 구간 탐색", "무음 제거 편집 (VAD)", "자동 챕터 분할 (CLIP)"], state="readonly", width=30)
         self.mode_combo.pack(side=tk.LEFT, padx=5, pady=10); self.mode_var.trace_add("write", lambda *args: self.reset_action_button())
-        self.btn_analyze = tk.Button(af, text="분석 시작", command=self.on_start_analysis, bg="#2980b9", fg="white", font=("bold"), pady=12); self.btn_analyze.pack(fill=tk.X, pady=5)
-        self.btn_stop = tk.Button(af, text="작업 중지", command=self.on_stop_action, bg="#c0392b", fg="white", font=("bold"), state=tk.DISABLED); self.btn_stop.pack(fill=tk.X, pady=2)
-        self.save_frame = tk.Frame(right_f); self.save_frame.pack(fill=tk.X, pady=2); self.save_frame.pack_forget()
-        tk.Label(self.save_frame, text="[ 영상 및 타임라인 내보내기 ]", fg="#8e44ad", font=("bold", 10)).pack(pady=2)
-        btn_box = tk.Frame(self.save_frame); btn_box.pack(fill=tk.X, pady=2)
-        self.btn_fast_save = tk.Button(btn_box, text="🚀 초고속 인코딩", command=lambda: self.start_export(fast=True), bg="#8e44ad", fg="white", pady=8); self.btn_fast_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
-        self.btn_pro_save = tk.Button(btn_box, text="🎯 정밀 인코딩", command=lambda: self.start_export(fast=False), bg="#2c3e50", fg="white", pady=8); self.btn_pro_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
-        self.btn_xml_save = tk.Button(btn_box, text="🎬 타임라인 XML", command=self.on_export_xml, bg="#16a085", fg="white", pady=8); self.btn_xml_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
-        self.lbl_status = tk.Label(right_f, text="준비됨", fg="#27ae60", font=("bold", 10)); self.lbl_status.pack(fill=tk.X, pady=5)
+        self.btn_analyze = tk.Button(af, text="분석 시작", command=self.on_start_analysis, bg=C['accent'], fg='white', font=('Segoe UI', 10, 'bold'), relief=tk.FLAT, pady=10); self.btn_analyze.pack(fill=tk.X, pady=5)
+        self.btn_stop = tk.Button(af, text="작업 중지", command=self.on_stop_action, bg=C['red'], fg='white', font=('Segoe UI', 10, 'bold'), relief=tk.FLAT, state=tk.DISABLED, pady=6); self.btn_stop.pack(fill=tk.X, pady=2)
+        self.save_frame = tk.Frame(right_f, bg=C['bg']); self.save_frame.pack(fill=tk.X, pady=2); self.save_frame.pack_forget()
+        tk.Label(self.save_frame, text="영상 및 타임라인 내보내기", fg=C['purple'], bg=C['bg'], font=('Segoe UI', 10, 'bold')).pack(pady=2)
+        btn_box = tk.Frame(self.save_frame, bg=C['bg']); btn_box.pack(fill=tk.X, pady=2)
+        self.btn_fast_save = tk.Button(btn_box, text="🚀 초고속", command=lambda: self.start_export(fast=True), bg=C['purple'], fg='white', font=('Segoe UI', 9), relief=tk.FLAT, pady=8); self.btn_fast_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        self.btn_pro_save = tk.Button(btn_box, text="🎯 정밀", command=lambda: self.start_export(fast=False), bg=C['bg3'], fg=C['text'], font=('Segoe UI', 9), relief=tk.FLAT, pady=8); self.btn_pro_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        self.btn_xml_save = tk.Button(btn_box, text="🎬 XML", command=self.on_export_xml, bg=C['surface'], fg=C['text'], font=('Segoe UI', 9), relief=tk.FLAT, pady=8); self.btn_xml_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        self.lbl_status = tk.Label(right_f, text="준비됨", fg=C['green'], bg=C['bg'], font=('Segoe UI', 10)); self.lbl_status.pack(fill=tk.X, pady=5)
         self.progress_var = tk.DoubleVar(); ttk.Progressbar(right_f, variable=self.progress_var).pack(fill=tk.X, pady=5)
-        list_f = tk.Frame(right_f); list_f.pack(fill=tk.BOTH, expand=True, pady=10)
+        list_f = tk.Frame(right_f, bg=C['bg']); list_f.pack(fill=tk.BOTH, expand=True, pady=10)
         
         # [시니어 최적화] 리스트 뷰와 드래그&드롭 블록 뷰를 전환할 수 있는 노트북(탭) 시스템
         self.notebook = ttk.Notebook(list_f)
@@ -157,63 +301,150 @@ class CustomModelApp:
         
         self.tree.bind("<ButtonRelease-1>", self.on_tree_click)
         self.tree.bind("<Button-3>", self.show_context_menu)
-        opt = tk.LabelFrame(right_f, text=" 상세 설정 ", padx=10, pady=10); opt.pack(fill=tk.X, pady=5)
+        
+        # [Ctrl+휠] 자막 시작/종료 시간 ±50ms 미세 조정
+        def _on_ctrl_wheel(e):
+            if not (e.state & 0x4): return  # Ctrl 키가 눌린 상태가 아니면 무시
+            item = self.tree.identify_row(e.y)
+            col = self.tree.identify_column(e.x)
+            if not item or col not in ('#2', '#3'): return
+            
+            try:
+                idx = int(self.tree.item(item)['values'][0]) - 1
+                if idx < 0 or idx >= len(self.results_data): return
+                
+                delta = 0.05 if e.delta > 0 else -0.05  # ±50ms
+                key = 's' if col == '#2' else 'e'
+                new_val = max(0, self.results_data[idx][key] + delta)
+                
+                # 시작이 종료보다 커지지 않도록 안전장치
+                if key == 's' and new_val >= self.results_data[idx]['e']: return
+                if key == 'e' and new_val <= self.results_data[idx]['s']: return
+                
+                self.results_data[idx][key] = round(new_val, 3)
+                self.tree.set(item, column=col, value=self.format_time(new_val))
+                
+                # 영상 재생 위치도 조절된 시간으로 이동 (귀로 확인)
+                self.player.set_time(int(new_val * 1000))
+                
+                # ASS 핫스왑으로 자막 실시간 반영
+                self.apply_preview_subtitles(force_reload=True)
+            except: pass
+            return "break"  # 기본 스크롤 동작 차단
+        
+        self.tree.bind("<MouseWheel>", _on_ctrl_wheel)
+        opt = tk.LabelFrame(right_f, text=" 상세 설정 ", padx=10, pady=10, bg=C['bg2'], fg=C['accent'], font=('Segoe UI', 10, 'bold')); opt.pack(fill=tk.X, pady=5)
         
         # [시니어 최적화] UI 공간 절약을 위해 가로 배치 및 간격 조절
-        set_f = tk.Frame(opt); set_f.pack(fill=tk.X, pady=2)
-        tk.Label(set_f, text="빔 사이즈:").pack(side=tk.LEFT)
+        set_f = tk.Frame(opt, bg=C['bg2']); set_f.pack(fill=tk.X, pady=2)
+        tk.Label(set_f, text="빔 사이즈:", bg=C['bg2'], fg=C['text'], font=('Segoe UI', 9)).pack(side=tk.LEFT)
         self.beam_size_var = tk.IntVar(value=5)
-        tk.Scale(set_f, from_=1, to=15, orient=tk.HORIZONTAL, variable=self.beam_size_var, showvalue=1, length=120).pack(side=tk.LEFT, padx=5)
+        tk.Scale(set_f, from_=1, to=15, orient=tk.HORIZONTAL, variable=self.beam_size_var, showvalue=1, length=120, bg=C['bg2'], fg=C['text'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.LEFT, padx=5)
         
-        chk_f = tk.Frame(opt); chk_f.pack(fill=tk.X, pady=2)
-        self.use_denoise_var = tk.BooleanVar(value=False); tk.Checkbutton(chk_f, text="소음 제거", variable=self.use_denoise_var).pack(side=tk.LEFT)
-        self.use_dominant_var = tk.BooleanVar(value=False); tk.Checkbutton(chk_f, text="주인공만", variable=self.use_dominant_var, fg="#e67e22").pack(side=tk.LEFT, padx=10)
+        chk_f = tk.Frame(opt, bg=C['bg2']); chk_f.pack(fill=tk.X, pady=2)
+        self.use_denoise_var = tk.BooleanVar(value=False); tk.Checkbutton(chk_f, text="소음 제거", variable=self.use_denoise_var, bg=C['bg2'], fg=C['text'], selectcolor=C['bg3'], activebackground=C['bg2'], font=('Segoe UI', 9)).pack(side=tk.LEFT)
+        self.use_dominant_var = tk.BooleanVar(value=False); tk.Checkbutton(chk_f, text="주인공만", variable=self.use_dominant_var, bg=C['bg2'], fg=C['orange'], selectcolor=C['bg3'], activebackground=C['bg2'], font=('Segoe UI', 9)).pack(side=tk.LEFT, padx=10)
         
-        # 언어 선택을 위로 올림
-        tk.Label(chk_f, text="언어:").pack(side=tk.LEFT, padx=(10, 0))
+        tk.Label(chk_f, text="언어:", bg=C['bg2'], fg=C['text'], font=('Segoe UI', 9)).pack(side=tk.LEFT, padx=(10, 0))
         self.lang_var = tk.StringVar(value="한국어 (ko)")
         self.lang_combo = ttk.Combobox(chk_f, textvariable=self.lang_var, values=["한국어 (ko)", "영어 (en)", "일본어 (ja)", "중국어 (zh)", "자동 감지 (auto)"], state="readonly", width=12)
         self.lang_combo.pack(side=tk.LEFT, padx=5)
 
-        vad_f = tk.Frame(opt); vad_f.pack(fill=tk.X, pady=2)
+        vad_f = tk.Frame(opt, bg=C['bg2']); vad_f.pack(fill=tk.X, pady=2)
         
-        # [시니어 추가] VAD 필터 옵션
         self.use_silero_vad_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(vad_f, text="외부 VAD (Silero)", variable=self.use_silero_vad_var).pack(side=tk.LEFT)
+        tk.Checkbutton(vad_f, text="외부 VAD (Silero)", variable=self.use_silero_vad_var, bg=C['bg2'], fg=C['text'], selectcolor=C['bg3'], activebackground=C['bg2'], font=('Segoe UI', 9)).pack(side=tk.LEFT)
         self.use_whisper_vad_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(vad_f, text="내부 VAD (Whisper)", variable=self.use_whisper_vad_var).pack(side=tk.LEFT, padx=5)
+        tk.Checkbutton(vad_f, text="내부 VAD (Whisper)", variable=self.use_whisper_vad_var, bg=C['bg2'], fg=C['text'], selectcolor=C['bg3'], activebackground=C['bg2'], font=('Segoe UI', 9)).pack(side=tk.LEFT, padx=5)
 
-        tk.Label(vad_f, text="무음/패딩:").pack(side=tk.LEFT, padx=(10, 0))
-        self.silence_dur_var = tk.DoubleVar(value=2.0); tk.Entry(vad_f, textvariable=self.silence_dur_var, width=4).pack(side=tk.LEFT, padx=2)
-        tk.Label(vad_f, text="s /").pack(side=tk.LEFT)
-        self.speech_pad_var = tk.DoubleVar(value=0.1); tk.Entry(vad_f, textvariable=self.speech_pad_var, width=4).pack(side=tk.LEFT, padx=2)
-        tk.Label(vad_f, text="s").pack(side=tk.LEFT, padx=(10, 0))
+        tk.Label(vad_f, text="무음/패딩:", bg=C['bg2'], fg=C['text'], font=('Segoe UI', 9)).pack(side=tk.LEFT, padx=(10, 0))
+        self.silence_dur_var = tk.DoubleVar(value=2.0); tk.Entry(vad_f, textvariable=self.silence_dur_var, width=4, bg=C['bg3'], fg=C['text'], insertbackground=C['text'], relief=tk.FLAT).pack(side=tk.LEFT, padx=2)
+        tk.Label(vad_f, text="s /", bg=C['bg2'], fg=C['text2'], font=('Segoe UI', 9)).pack(side=tk.LEFT)
+        self.speech_pad_var = tk.DoubleVar(value=0.1); tk.Entry(vad_f, textvariable=self.speech_pad_var, width=4, bg=C['bg3'], fg=C['text'], insertbackground=C['text'], relief=tk.FLAT).pack(side=tk.LEFT, padx=2)
+        tk.Label(vad_f, text="s", bg=C['bg2'], fg=C['text2'], font=('Segoe UI', 9)).pack(side=tk.LEFT, padx=(10, 0))
         self.vad_threshold_var = tk.DoubleVar(value=0.35)
-        tk.Scale(vad_f, from_=0.1, to=0.9, resolution=0.05, orient=tk.HORIZONTAL, variable=self.vad_threshold_var, showvalue=1, length=100).pack(side=tk.LEFT, padx=5)
+        tk.Scale(vad_f, from_=0.1, to=0.9, resolution=0.05, orient=tk.HORIZONTAL, variable=self.vad_threshold_var, showvalue=1, length=100, bg=C['bg2'], fg=C['text'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.LEFT, padx=5)
 
-        adv_f = tk.Frame(opt); adv_f.pack(fill=tk.X, pady=2)
+        adv_f = tk.Frame(opt, bg=C['bg2']); adv_f.pack(fill=tk.X, pady=2)
         
-        # [시니어 추가] 하드웨어 가속 선택기
-        tk.Label(adv_f, text="가속:").pack(side=tk.LEFT)
+        tk.Label(adv_f, text="가속:", bg=C['bg2'], fg=C['text'], font=('Segoe UI', 9)).pack(side=tk.LEFT)
         self.device_var = tk.StringVar(value="자동 감지 (auto)")
         ttk.Combobox(adv_f, textvariable=self.device_var, values=["자동 감지 (auto)", "NVIDIA (cuda)", "Apple Mac (mps)", "CPU (멀티코어)"], state="readonly", width=14).pack(side=tk.LEFT, padx=5)
 
         self.remove_punctuation_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(adv_f, text="문장 부호 소거 (.,-)", variable=self.remove_punctuation_var, fg="#34495e").pack(side=tk.LEFT, padx=5)
+        tk.Checkbutton(adv_f, text="문장 부호 소거 (.,-)", variable=self.remove_punctuation_var, bg=C['bg2'], fg=C['text2'], selectcolor=C['bg3'], activebackground=C['bg2'], font=('Segoe UI', 9)).pack(side=tk.LEFT, padx=5)
 
-        lf = tk.Frame(opt)
+        lf = tk.Frame(opt, bg=C['bg2'])
         lf.pack(fill=tk.X, pady=2)
         
-        tk.Label(lf, text="대사 길이:").pack(side=tk.LEFT)
+        tk.Label(lf, text="대사 길이:", bg=C['bg2'], fg=C['text'], font=('Segoe UI', 9)).pack(side=tk.LEFT)
         self.max_len_int = tk.IntVar(value=50)
         self.max_len_str = tk.StringVar(value="50")
         
-        tk.Scale(lf, from_=10, to=50, orient=tk.HORIZONTAL, variable=self.max_len_int, showvalue=0, command=lambda v: self.max_len_str.set(str(v)), length=150).pack(side=tk.LEFT, padx=5)
-        tk.Entry(lf, textvariable=self.max_len_str, width=3).pack(side=tk.LEFT)
+        tk.Scale(lf, from_=10, to=50, orient=tk.HORIZONTAL, variable=self.max_len_int, showvalue=0, command=lambda v: self.max_len_str.set(str(v)), length=150, bg=C['bg2'], fg=C['text'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.LEFT, padx=5)
+        tk.Entry(lf, textvariable=self.max_len_str, width=3, bg=C['bg3'], fg=C['text'], insertbackground=C['text'], relief=tk.FLAT).pack(side=tk.LEFT)
         
         self.export_format = tk.StringVar(value="SRT")
-        tk.Button(lf, text="자막 내보내기", command=self.export_subtitles, bg="#e67e22", fg="white", padx=10).pack(side=tk.RIGHT, padx=5)
+        tk.Button(lf, text="자막 내보내기", command=self.export_subtitles, bg=C['orange'], fg='white', font=('Segoe UI', 9), relief=tk.FLAT, padx=10).pack(side=tk.RIGHT, padx=5)
         ttk.Combobox(lf, textvariable=self.export_format, values=["SRT", "VTT", "TXT", "CSV"], state="readonly", width=6).pack(side=tk.RIGHT, padx=5)
+
+    def _open_font_picker(self):
+        """시스템 폰트 전체를 자체 서체로 미리보기하며 검색/선택하는 팝업"""
+        popup = tk.Toplevel(self.root)
+        popup.title("폰트 선택")
+        popup.geometry("380x500")
+        popup.configure(bg="#2d2d2d")
+        popup.transient(self.root)
+        popup.grab_set()
+        
+        # 시스템 폰트 목록 (중복 제거 + 정렬)
+        all_fonts = sorted(set(tkfont.families()), key=str.lower)
+        
+        # 검색 입력창
+        search_var = tk.StringVar()
+        search_entry = tk.Entry(popup, textvariable=search_var, font=("맑은 고딕", 11), bg="#444", fg="white", insertbackground="white")
+        search_entry.pack(fill=tk.X, padx=10, pady=(10, 5))
+        search_entry.focus_set()
+        
+        # 폰트 리스트 (Text 위젯 + 스크롤바)
+        list_frame = tk.Frame(popup, bg="#2d2d2d")
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        
+        scrollbar = tk.Scrollbar(list_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        text_w = tk.Text(list_frame, bg="#1a1a1a", fg="white", cursor="hand2", wrap=tk.NONE,
+                         yscrollcommand=scrollbar.set, spacing1=2, spacing3=2, padx=8, pady=4)
+        text_w.pack(fill=tk.BOTH, expand=True)
+        scrollbar.config(command=text_w.yview)
+        
+        def _select_font(fname):
+            self._sub_font_name.set(fname)
+            popup.destroy()
+        
+        def _populate(filter_text=""):
+            text_w.config(state=tk.NORMAL)
+            text_w.delete("1.0", tk.END)
+            ft = filter_text.lower()
+            for fname in all_fonts:
+                if ft and ft not in fname.lower():
+                    continue
+                tag = f"f_{fname}"
+                try:
+                    text_w.insert(tk.END, f" {fname}\n", tag)
+                    text_w.tag_config(tag, font=(fname, 12), foreground="white")
+                    text_w.tag_bind(tag, "<Button-1>", lambda e, f=fname: _select_font(f))
+                    text_w.tag_bind(tag, "<Enter>", lambda e, t=tag: text_w.tag_config(t, background="#3a6fd8"))
+                    text_w.tag_bind(tag, "<Leave>", lambda e, t=tag: text_w.tag_config(t, background=""))
+                except:
+                    pass
+            text_w.config(state=tk.DISABLED)
+        
+        _populate()
+        
+        def _on_search(*_):
+            _populate(search_var.get())
+        search_var.trace_add("write", _on_search)
 
     def bind_keys(self): self.root.bind("<space>", lambda e: self.toggle_play()); self.root.bind("<Left>", lambda e: self.skip_time(-5000)); self.root.bind("<Right>", lambda e: self.skip_time(5000))
     def format_time(self, t_sec):
@@ -230,7 +461,11 @@ class CustomModelApp:
 
     def load_engine_async(self): threading.Thread(target=self.controller.init_engine, daemon=True).start()
 
-    def reset_action_button(self): self.save_frame.pack_forget(); self.btn_analyze.config(text="분석 시작", command=self.on_start_analysis, bg="#2980b9", state=tk.NORMAL); self.btn_fast_save.config(state=tk.NORMAL); self.btn_pro_save.config(state=tk.NORMAL); self.btn_xml_save.config(state=tk.NORMAL)
+    def reset_action_button(self): self.save_frame.pack_forget(); self.btn_analyze.config(text="분석 시작", command=self.on_start_analysis, bg=self.C['accent'], state=tk.NORMAL); self.btn_fast_save.config(state=tk.NORMAL); self.btn_pro_save.config(state=tk.NORMAL); self.btn_xml_save.config(state=tk.NORMAL)
+    def apply_vlc_sub_settings(self):
+        """[ASS 핫스왓] 디자인 변경 시 ASS 파일만 재생성하여 VLC에 즉시 로드"""
+        self.apply_preview_subtitles(force_reload=False)
+
     def on_select_video(self):
         p = filedialog.askopenfilename(filetypes=[("Video files", "*.mp4 *.avi *.mkv *.mov *.flv")])
         if p:
@@ -241,7 +476,18 @@ class CustomModelApp:
                 self.preview_srt_path = None
                 
             if self.player.load_video(p):
-                self.lbl_status.config(text="영상 로드됨: " + os.path.basename(p), fg="#2980b9")
+                def _resize():
+                    w, h = self.player.get_video_resolution()
+                    if w > 0 and h > 0:
+                        self._video_aspect = h / w  # 영상 비율 저장
+                        cw = self.video_canvas.winfo_width()
+                        if cw < 10: cw = 500
+                        new_h = int(cw * self._video_aspect)
+                        if new_h > 10: self.video_canvas.config(height=new_h)
+                    self.video_canvas.pack_propagate(False)
+                self.root.after(500, _resize)
+                
+                self.lbl_status.config(text="영상 로드됨: " + os.path.basename(p), fg=self.C['accent'])
                 self.reset_action_button()
                 
                 if hasattr(self, 'preview_srt_path') and getattr(self, 'preview_srt_path') and os.path.exists(self.preview_srt_path):
@@ -255,9 +501,9 @@ class CustomModelApp:
         if self.stop_event and not self.stop_event.is_set(): 
             self.stop_event.set()
             # 큐를 완전 증발 시킬 필요가 없어짐 (이벤트 구독 구조이므로 stop_event가 set되면 컨트롤러가 발송 중단함)
-            self.lbl_status.config(text="■ 작업 중지 중... 완전 종료 대기", fg="red")
+            self.lbl_status.config(text="■ 작업 중지 중... 완전 종료 대기", fg=self.C['red'])
             self.btn_stop.config(state=tk.DISABLED)
-            self.root.after(1500, lambda: self.reset_action_button() or self.lbl_status.config(text="작업 중지됨", fg="red"))
+            self.root.after(1500, lambda: self.reset_action_button() or self.lbl_status.config(text="작업 중지됨", fg=self.C['red']))
 
     def on_start_analysis(self):
         mode = self.mode_var.get()
@@ -426,23 +672,81 @@ class CustomModelApp:
         item = self.tree.identify_row(e.y)
         if item: self.tree.selection_set(item); self.menu.post(e.x_root, e.y_root)
     def apply_preview_subtitles(self, force_reload=False):
+        """[ASS 핫스왓] 사용자 디자인 설정을 반영한 ASS 파일을 동적 생성하여 VLC에 주입"""
         if not self.results_data or not self.player: return
         try:
-            # [시니어 최적화] VLC 경로 캐싱 무효화를 위한 A/B 핑퐁 시스템 적용 (파일명이 같으면 VLC가 로드하지 않음)
-            suffix = "A" if getattr(self, "_ping_pong", False) else "B"
-            self._ping_pong = not getattr(self, "_ping_pong", False)
-            srt_name = os.path.abspath(f"temp_preview_{suffix}.srt")
+            # --- HEX(#RRGGBB) → ASS(&H00BBGGRR&) 변환 ---
+            def hex_to_ass(hex_color):
+                hex_color = hex_color.lstrip('#')
+                r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+                return f"&H00{b:02X}{g:02X}{r:02X}&"
             
-            with open(srt_name, "w", encoding="utf-8") as f:
-                for i, r in enumerate(self.results_data):
-                    s_r, e_r = r['s'], r['e']
-                    # [시니어 최적화] 다음 자막과 시간이 겹치거나 맞닿으면 0.05초(50ms) 갭을 추가하여 자막 분리 깜박임 구현
-                    if i < len(self.results_data) - 1 and e_r >= self.results_data[i+1]['s']: e_r = max(s_r + 0.1, self.results_data[i+1]['s'] - 0.05)
-                    s = time.strftime('%H:%M:%S', time.gmtime(s_r)) + f",{int((s_r%1)*1000):03d}"; e = time.strftime('%H:%M:%S', time.gmtime(e_r)) + f",{int((e_r%1)*1000):03d}"; f.write(f"{i+1}\n{s} --> {e}\n{r['t']}\n\n")
+            # --- 사용자 UI 설정값 수집 ---
+            font_name = getattr(self, 'sub_font', None)
+            font_name = font_name.get() if font_name else '맑은 고딕'
+            font_size = getattr(self, 'sub_font_size', None)
+            font_size = font_size.get() if font_size else 40
+            color_f = getattr(self, 'sub_color_f', None)
+            color_f = color_f.get() if color_f else '#ffffff'
+            outline_w = getattr(self, 'sub_outline', None)
+            outline_w = outline_w.get() if outline_w else 3
+            color_o = getattr(self, 'sub_color_o', None)
+            color_o = color_o.get() if color_o else '#000000'
+            shadow_w = getattr(self, 'sub_shadow', None)
+            shadow_w = shadow_w.get() if shadow_w else 3
+            color_s = getattr(self, 'sub_color_s', None)
+            color_s = color_s.get() if color_s else '#000000'
+            margin_v = getattr(self, 'sub_y_pos', None)
+            margin_v = margin_v.get() if margin_v else 50
             
-            self.player.set_subtitle(srt_name)
+            ass_primary = hex_to_ass(color_f)
+            ass_outline = hex_to_ass(color_o)
+            ass_shadow = hex_to_ass(color_s)
             
-            # [시니어 최적화] 실시간 타이핑 시 VLC가 일시정지 상태라면, 강제로 현재 시간에 다시 제자리 점프하여 프레임을 새로고침
+            # --- ASS 헤더 작성 ---
+            ass_header = f"""[Script Info]
+Title: VAD AI Studio Preview
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+WrapStyle: 0
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,{font_name},{font_size},{ass_primary},&H000000FF&,{ass_outline},{ass_shadow},-1,0,0,0,100,100,0,0,1,{outline_w},{shadow_w},2,10,10,{margin_v},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+            # --- ASS 시간 포맷 H:MM:SS.cs ---
+            def fmt_ass_time(sec):
+                h = int(sec // 3600)
+                m = int((sec % 3600) // 60)
+                s = int(sec % 60)
+                cs = int((sec % 1) * 100)
+                return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+            
+            lines = []
+            for i, r in enumerate(self.results_data):
+                s_r, e_r = r['s'], r['e']
+                if i < len(self.results_data) - 1 and e_r >= self.results_data[i+1]['s']:
+                    e_r = max(s_r + 0.1, self.results_data[i+1]['s'] - 0.05)
+                lines.append(f"Dialogue: 0,{fmt_ass_time(s_r)},{fmt_ass_time(e_r)},Default,,0,0,0,,{r['t']}")
+            
+            # --- A/B 핑퉁 핫스왓 ---
+            suffix = "A" if getattr(self, '_ping_pong', False) else "B"
+            self._ping_pong = not getattr(self, '_ping_pong', False)
+            ass_name = os.path.abspath(f"temp_preview_{suffix}.ass")
+            
+            with open(ass_name, 'w', encoding='utf-8-sig') as f:
+                f.write(ass_header)
+                f.write('\n'.join(lines))
+                f.write('\n')
+            
+            self.preview_srt_path = ass_name
+            self.player.set_subtitle(ass_name)
+            
+            # [시니어 최적화] 일시정지 상태일 때 제자리 점프로 프레임 새로고침
             if force_reload and not self.player.is_playing():
                 curr = self.player.get_time()
                 if curr >= 0:

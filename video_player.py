@@ -9,13 +9,13 @@ class VideoPlayer:
         self.vlc_available = False
         self.instance = None
         self.player = None
-        
         try:
             # [시니어 최적화] 하드웨어 가속(D3D11VA) 상시 활성화
             # 화면 일시적 깨짐(log error)이 발생해도 바로 복구되므로 일관성있는 GPU 가속 유지
             # --avcodec-hw=any: 하드웨어 가속 사용 (Direct3D11 등)
             self.instance = vlc.Instance("--no-xlib", "--avcodec-hw=any", "--drop-late-frames", "--skip-frames")
             self.player = self.instance.media_player_new()
+            self.player.set_hwnd(self.canvas_id)
             self.vlc_available = True
         except Exception as e:
             print(f"VLC Initialization Error: {e}")
@@ -32,10 +32,10 @@ class VideoPlayer:
                 
             media = self.instance.media_new(video_path)
             
-            media.add_option(":avcodec-hw=any") # 하드웨어 가속 강제 (VLC 자체 프록시 미사용)
+            media.add_option(":avcodec-hw=any") # 하드웨어 가속 강제
                 
-            self.player.set_media(media)
             self.player.set_hwnd(self.canvas_id)
+            self.player.set_media(media)
             self.player.video_set_scale(0.0)
             
             # [시니어 최적화] VLC가 마우스 입력을 가로채어 Tkinter 클릭(Play/Pause)이 무시되는 현상 방어
@@ -71,10 +71,10 @@ class VideoPlayer:
             print(f"Error loading video: {e}")
             return False
 
-    def set_subtitle(self, srt_path):
-        """외부 자막 파일(.srt)을 플레이어에 적용"""
-        if self.vlc_available and self.player and os.path.exists(srt_path):
-            self.player.video_set_subtitle_file(srt_path)
+    def set_subtitle(self, sub_path):
+        """외부 자막 파일(.ass/.srt)을 플레이어에 적용"""
+        if self.vlc_available and self.player and os.path.exists(sub_path):
+            self.player.video_set_subtitle_file(sub_path)
             return True
         return False
 
