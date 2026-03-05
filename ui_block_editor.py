@@ -82,7 +82,7 @@ class UIBlockEditor:
             
             if word_tag or time_tag or row_tag:
                 try:
-                    delta = -0.1 if event.delta > 0 else 0.1
+                    delta = -0.05 if event.delta > 0 else 0.05
                     results_data = self.transcript_manager.get_all()
                     
                     if word_tag:

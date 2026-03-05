@@ -16,6 +16,74 @@ from event_dispatcher import EventEmitter
 from analysis_controller import AnalysisController
 from ui_block_editor import UIBlockEditor
 
+class LblMarquee(tk.Canvas):
+    def __init__(self, parent, text="", font=('Noto Sans KR', 11), fg='#34C759', bg='#FFFFFF', height=30):
+        super().__init__(parent, bg=bg, height=height, highlightthickness=0, bd=0)
+        self.fg = fg
+        self.font = font
+        self.text = text
+        self.text1 = self.create_text(0, height//2, text=text, fill=fg, font=font, anchor=tk.W)
+        self.text2 = self.create_text(-9999, height//2, text=text, fill=fg, font=font, anchor=tk.W)
+        self._running = False
+        self.bind("<Configure>", lambda e: self._restart())
+
+    def config(self, text=None, fg=None, **kwargs):
+        if text is not None:
+            self.text = text
+            self.itemconfigure(self.text1, text=text)
+            self.itemconfigure(self.text2, text=text)
+            self._restart()
+        if fg is not None:
+            self.fg = fg
+            self.itemconfigure(self.text1, fill=fg)
+            self.itemconfigure(self.text2, fill=fg)
+        if kwargs:
+            super().configure(**kwargs)
+
+    def _restart(self):
+        self._running = False
+        self.after(100, self._start_scroll)
+
+    def _start_scroll(self):
+        self._running = True
+        self._scroll()
+
+    def _scroll(self):
+        if not self._running or not self.winfo_exists(): return
+        bbox = self.bbox(self.text1)
+        if not bbox: return
+        tw = bbox[2] - bbox[0]
+        vw = self.winfo_width()
+        
+        if tw > vw:
+            self.move(self.text1, -1, 0)
+            self.move(self.text2, -1, 0)
+            
+            x1 = self.coords(self.text1)[0]
+            x2 = self.coords(self.text2)[0]
+            
+            gap = 60 # 텍스트 사이 간격 (사용자 요청에 따라 짧게 조정)
+            
+            # 첫 번째 텍스트가 화면 왼쪽으로 완전히 나가면 두 번째 텍스트 뒤로 배치
+            if x1 < -tw:
+                self.coords(self.text1, x2 + tw + gap, self.winfo_height()//2)
+            # 두 번째 텍스트가 화면 왼쪽으로 완전히 나가면 첫 번째 텍스트 뒤로 배치 (또는 초기화 시)
+            if x2 < -tw:
+                if x1 > vw: # 초기 상태
+                    self.coords(self.text2, x1 + tw + gap, self.winfo_height()//2)
+                else:
+                    self.coords(self.text2, x1 + tw + gap, self.winfo_height()//2)
+            
+            # 초기 구동 시 두 번째 텍스트 위치 보정
+            if x2 < -tw and x1 <= 0:
+                 self.coords(self.text2, x1 + tw + gap, self.winfo_height()//2)
+
+        else:
+            self.coords(self.text1, (vw-tw)//2, self.winfo_height()//2)
+            self.coords(self.text2, -9999, -9999)
+            
+        self.after(30, self._scroll)
+
 class CustomModelApp:
     @property
     def results_data(self):
@@ -266,7 +334,7 @@ class CustomModelApp:
         self.mode_combo.pack(fill=tk.X, pady=(0,6)); self.mode_var.trace_add('write', lambda *_: self.reset_action_button())
         self.btn_analyze = tk.Button(c2, text='  분석 시작  ', command=self.on_start_analysis, bg=C['accent'], fg='white', font=('Noto Sans KR', 13, 'bold'), relief='flat', bd=0, compound='center', pady=10, cursor='hand2'); self.btn_analyze.pack(fill=tk.X, pady=(0,4)); _hover(self.btn_analyze, C['accent'], '#0062CC')
         self.btn_stop = tk.Button(c2, text='  작업 중지  ', command=self.on_stop_action, bg=C['bg3'], fg=C['red'], font=_fb, relief='flat', bd=0, compound='center', state=tk.DISABLED, pady=5, cursor='hand2'); self.btn_stop.pack(fill=tk.X); _hover(self.btn_stop, C['bg3'], C['border'])
-        self.lbl_status = tk.Label(c2, text='준비됨', fg=C['green'], bg=C['bg2'], font=_f); self.lbl_status.pack(fill=tk.X, pady=(6,0))
+        self.lbl_status = LblMarquee(c2, text='준비됨', fg=C['green'], bg=C['bg2'], font=_f); self.lbl_status.pack(fill=tk.X, pady=(6,0))
         self.progress_var = tk.DoubleVar(); ttk.Progressbar(c2, variable=self.progress_var).pack(fill=tk.X, pady=(4,0))
         self.save_frame = tk.Frame(c2, bg=C['bg2']); self.save_frame.pack(fill=tk.X, pady=4); self.save_frame.pack_forget()
         btn_box = tk.Frame(self.save_frame, bg=C['bg2']); btn_box.pack(fill=tk.X)
@@ -935,7 +1003,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             try:
                 if not paned.winfo_exists(): return
                 # PanedWindow에 위젯이 2개 이상 추가되어 Sash가 생성된 경우에만 작동
-                if paned.count() > 1:
+                # [오류 수정] tk.PanedWindow에는 count() 메서드가 없으므로 panes()의 길이로 체크
+                if len(paned.panes()) > 1:
                     coords = paned.sash_coord(0)
                     if orient == 'h':
                         # 수직 핸들을 Sash 중앙에 배치
