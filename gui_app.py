@@ -182,6 +182,11 @@ class CustomModelApp:
         self.tree.insert("", "end", values=(task["i"], self.format_time(task['s']), self.format_time(task['e']), task['t']))
         if hasattr(self, 'block_editor'):
             self.block_editor.render_block_view()
+            
+        # [사용자 요청] 분석 중 생성되는 자막을 영상에 실시간으로 입힘 (디바운스로 부하 제어)
+        if getattr(self, '_add_row_debounce', None):
+            self.root.after_cancel(self._add_row_debounce)
+        self._add_row_debounce = self.root.after(500, lambda: self.apply_preview_subtitles(force_reload=False))
         
     def _on_complete(self, task):
         self.lbl_status.config(text=task["text"], fg=self.C['green']); self.progress_var.set(100)
@@ -367,8 +372,8 @@ class CustomModelApp:
         self.vad_threshold_var = tk.DoubleVar(value=0.35); tk.Scale(r, from_=0.1, to=0.9, resolution=0.05, orient=tk.HORIZONTAL, variable=self.vad_threshold_var, showvalue=1, length=120, bg=C['bg2'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.RIGHT)
         
         r = _row(c3); tk.Label(r, text='대사 길이', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
-        self.max_len_int = tk.IntVar(value=50)
-        tk.Scale(r, from_=10, to=80, orient=tk.HORIZONTAL, variable=self.max_len_int, showvalue=1, length=120, bg=C['bg2'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.RIGHT)
+        self.max_len_int = tk.IntVar(value=20)
+        tk.Scale(r, from_=10, to=50, orient=tk.HORIZONTAL, variable=self.max_len_int, showvalue=1, length=120, bg=C['bg2'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.RIGHT)
         
         # [사용자 요청] ── 자막 설정 (스타일) 탭 UI 통합 구현 ──
         cs = self.tab_style
@@ -493,6 +498,7 @@ class CustomModelApp:
                             if nv <= self.results_data[idx]['s'] or (idx < len(self.results_data)-1 and nv > self.results_data[idx+1]['s']): valid = False
                         
                         if valid:
+                            self.transcript_manager.save_state()
                             self.results_data[idx][key] = round(nv, 3)
                             self.tree.set(item, column=col, value=self.format_time(nv))
                             self.player.set_time(int(nv * 1000))
@@ -589,9 +595,24 @@ class CustomModelApp:
             self.skip_time(5000)
             return "break"
 
+        def _on_undo(e):
+            if _is_editing(): return # 편집 중인 텍스트의 undo는 시스템에 맡김
+            if self.transcript_manager.undo():
+                self.rebuild_tree_and_render()
+            return "break"
+            
+        def _on_redo(e):
+            if _is_editing(): return
+            if self.transcript_manager.redo():
+                self.rebuild_tree_and_render()
+            return "break"
+
         self.root.bind_all("<space>", _on_space)
         self.root.bind_all("<Left>",  _on_left)
         self.root.bind_all("<Right>", _on_right)
+        self.root.bind_all("<Control-z>", _on_undo)
+        self.root.bind_all("<Control-y>", _on_redo)
+        self.root.bind_all("<Control-Z>", _on_redo) # Shift+Z
 
         # [사용자 요청] 탭이나 리스트에 포커스가 있을 때 방향키로 메뉴가 넘어가는 Tkinter 기본 동작 차단
         try:
@@ -753,7 +774,9 @@ class CustomModelApp:
 
 
     def _open_editor(self, item, x, y, w, h, click_x=None):
-        val = self.tree.item(item)['values']
+        val = self.tree.item(item).get('values')
+        if not val: return
+        target_idx = int(val[0]) - 1
         text = str(val[3] if len(val) > 3 else "")
         entry = tk.Entry(self.tree)
         entry.place(x=x, y=y, width=w, height=h)
@@ -772,12 +795,15 @@ class CustomModelApp:
         # [시니어 모션 트래킹] 스크롤 시 텍스트 입력창이 원본 셀 위치를 실시간으로 따라가도록 추적
         def _track_position():
             if not entry.winfo_exists(): return
-            bbox = self.tree.bbox(item, '#4')
-            if bbox:
-                nx, ny, nw, nh = bbox
-                entry.place(x=nx, y=ny, width=max(nw, 200), height=max(nh, 20))
+            if not self.tree.exists(item):
+                entry.place(x=-9999, y=-9999)
             else:
-                entry.place(x=-9999, y=-9999) # 화면 밖으로 스크롤 시 임시 숨김 처리
+                bbox = self.tree.bbox(item, '#4')
+                if bbox:
+                    nx, ny, nw, nh = bbox
+                    entry.place(x=nx, y=ny, width=max(nw, 200), height=max(nh, 20))
+                else:
+                    entry.place(x=-9999, y=-9999) # 화면 밖으로 스크롤 시 임시 숨김 처리
             self.root.after(15, _track_position)
         
         _track_position()
@@ -792,15 +818,19 @@ class CustomModelApp:
         def save_edit_live():
             if not entry.winfo_exists(): return
             new_text = entry.get()
-            self.tree.set(item, column='#4', value=new_text)
-            try:
-                idx = int(self.tree.item(item)['values'][0]) - 1
-                if 0 <= idx < len(self.results_data):
-                    self.results_data[idx]['t'] = new_text
-                    # [시니어 최적화] 텍스트 수정 발생 시 기존 단어 블록(배열) 파쇄를 통해 탭2 진입 시 자동 분할 재계산 유도
-                    self.results_data[idx].pop('words', None)
-                    self.apply_preview_subtitles(force_reload=True)
-            except Exception as e: print(f'[WARN] 인라인 편집 저장 오류: {e}')
+            
+            if not (0 <= target_idx < len(self.results_data)): return
+            old_text = self.results_data[target_idx].get('t', "")
+            
+            if old_text != new_text:
+                self.transcript_manager.save_state()
+                self.results_data[target_idx]['t'] = new_text
+                # [시니어 최적화] 텍스트 수정 발생 시 기존 단어 블록(배열) 파쇄를 통해 탭2 진입 시 자동 분할 재계산 유도
+                self.results_data[target_idx].pop('words', None)
+                self.apply_preview_subtitles(force_reload=True)
+            
+            if self.tree.exists(item):
+                self.tree.set(item, column='#4', value=new_text)
 
         entry.bind('<KeyRelease>', _on_key_release)
 

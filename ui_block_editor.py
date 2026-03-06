@@ -100,6 +100,7 @@ class UIBlockEditor:
                             else:
                                 if nv <= target_word['s'] or (w_idx < len(results_data[idx]['words']) - 1 and nv > results_data[idx]['words'][w_idx+1]['s']) or (w_idx == len(results_data[idx]['words']) - 1 and idx < len(results_data) - 1 and nv > results_data[idx+1]['s']): valid = False
                             if valid:
+                                self.transcript_manager.save_state()
                                 target_word[key] = round(nv, 3)
                                 results_data[idx]['s'] = min(w['s'] for w in results_data[idx]['words'])
                                 results_data[idx]['e'] = max(w['e'] for w in results_data[idx]['words'])
@@ -117,6 +118,7 @@ class UIBlockEditor:
                         else:
                             if nv <= results_data[idx]['s'] or (idx < len(results_data)-1 and nv > results_data[idx+1]['s']): valid = False
                         if valid:
+                            self.transcript_manager.save_state()
                             results_data[idx][key] = round(nv, 3)
                             if results_data[idx].get('words'):
                                 if key == 's': results_data[idx]['words'][0]['s'] = nv
@@ -134,6 +136,7 @@ class UIBlockEditor:
                         else:
                             if nv <= results_data[idx]['s'] or (idx < len(results_data)-1 and nv > results_data[idx+1]['s']): valid = False
                         if valid:
+                            self.transcript_manager.save_state()
                             results_data[idx][key] = round(nv, 3)
                             if results_data[idx].get('words'):
                                 if key == 's': results_data[idx]['words'][0]['s'] = nv
@@ -171,7 +174,29 @@ class UIBlockEditor:
         self.block_canvas.create_window(x1-2, y1-2, window=entry, width=(x2-x1)+4, height=(y2-y1)+4, anchor='nw', tag="editing_entry")
         entry.focus_set()
         entry.selection_range(0, tk.END)
+
+        import tkinter.font as tkfont
+        _fnt = tkfont.Font(font=("Noto Sans KR", 13))
         
+        def _resize_entry(event=None):
+            if not entry.winfo_exists(): return
+            txt = entry.get()
+            tw = _fnt.measure(txt) + 20 # 여백 포함
+            new_w = max((x2-x1)+4, tw)
+            
+            # [시니어 모션 렌더링] 커지는 폭만큼 우측 블록들을 실시간으로 밀어냄
+            if hasattr(entry, '_prev_w'):
+                delta = new_w - entry._prev_w
+                if delta != 0:
+                    for i in range(w_idx + 1, len(results_data[idx]['words'])):
+                        self.block_canvas.move(f"{idx}_{i}", delta, 0)
+            
+            entry._prev_w = new_w
+            self.block_canvas.itemconfigure("editing_entry", width=new_w)
+            
+        entry._prev_w = (x2-x1)+4
+        entry.bind("<KeyRelease>", _resize_entry)
+
         def _save(*_):
             if not entry.winfo_exists(): return
             new_val = entry.get().strip()
@@ -179,6 +204,7 @@ class UIBlockEditor:
             self.active_entry_save_cb = None
             
             if new_val and new_val != current_text:
+                self.transcript_manager.save_state()
                 w_obj['word'] = new_val
                 # 문장 전체 텍스트 갱신
                 results_data[idx]['t'] = ' '.join(w['word'].strip() for w in results_data[idx]['words'])
@@ -314,6 +340,7 @@ class UIBlockEditor:
         words = results_data[idx].get('words', [])
         if not words or w_idx == 0 or w_idx >= len(words): return
         
+        self.transcript_manager.save_state()
         new_words = words[w_idx:]
         results_data[idx]['words'] = words[:w_idx]
         
@@ -339,6 +366,7 @@ class UIBlockEditor:
         words = results_data[idx].get('words', [])
         if not words or w_idx < 0 or w_idx >= len(words): return
         
+        self.transcript_manager.save_state()
         words.pop(w_idx)
         
         if not words:
@@ -359,6 +387,7 @@ class UIBlockEditor:
         results_data = self.transcript_manager.get_all()
         if idx < 0 or idx >= len(results_data): return
         
+        self.transcript_manager.save_state()
         results_data.pop(idx)
         self.rebuild_tree_and_render()
 
@@ -371,6 +400,8 @@ class UIBlockEditor:
         
         base_idx = min(idx, target_idx)
         merge_idx = max(idx, target_idx)
+        
+        self.transcript_manager.save_state()
         
         w1 = results_data[base_idx].get('words', [])
         w2 = results_data[merge_idx].get('words', [])
@@ -709,6 +740,7 @@ class UIBlockEditor:
                 self.render_block_view()
                 return
             else:
+                self.transcript_manager.save_state()
                 w_obj = results_data[s_idx]['words'].pop(w_idx)
                 affected_indices = set([s_idx])
                 

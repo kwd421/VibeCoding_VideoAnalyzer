@@ -1,3 +1,4 @@
+import copy
 from typing import List, Dict, Any, Callable
 from config_models import TranscriptSegment
 
@@ -5,9 +6,34 @@ class TranscriptManager:
     """[시니어 상태 관리] 전체 트랜스크립트 딕셔너리 리스트 상태를 관리하는 중앙 통제소"""
     def __init__(self):
         self.results_data: List[Dict[str, Any]] = []
+        self.undo_stack: List[List[Dict[str, Any]]] = []
+        self.redo_stack: List[List[Dict[str, Any]]] = []
 
     def clear(self):
+        self.undo_stack.clear()
+        self.redo_stack.clear()
         self.results_data = []
+
+    def save_state(self):
+        """현재 상태를 undo 스택에 저장 (최대 50개)"""
+        if len(self.undo_stack) >= 50:
+            self.undo_stack.pop(0)
+        self.undo_stack.append(copy.deepcopy(self.results_data))
+        self.redo_stack.clear()
+
+    def undo(self) -> bool:
+        """이전 상태로 되돌리기"""
+        if not self.undo_stack: return False
+        self.redo_stack.append(copy.deepcopy(self.results_data))
+        self.results_data = self.undo_stack.pop()
+        return True
+
+    def redo(self) -> bool:
+        """실행 취소한 상태를 다시 복구하기"""
+        if not self.redo_stack: return False
+        self.undo_stack.append(copy.deepcopy(self.results_data))
+        self.results_data = self.redo_stack.pop()
+        return True
 
     def get_all(self):
         return self.results_data
