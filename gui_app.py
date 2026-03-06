@@ -328,7 +328,7 @@ class CustomModelApp:
         self.ai_model_var.trace_add('write', lambda *_: self.reset_action_button())
         _sep(c1)
         r = _row(c1); tk.Label(r, text='가속 장치', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
-        self.device_var = tk.StringVar(value='자동 감지 (auto)'); ttk.Combobox(r, textvariable=self.device_var, values=['자동 감지 (auto)', 'NVIDIA (cuda)', 'Apple Mac (mps)', 'CPU (멀티코어)'], state='readonly', width=14).pack(side=tk.RIGHT)
+        self.device_var = tk.StringVar(value='자동 감지 (auto)'); ttk.Combobox(r, textvariable=self.device_var, values=['자동 감지 (auto)', 'NVIDIA (cuda)', 'Apple Mac (mps)', 'CPU (25%)', 'CPU (50%)', 'CPU (75%)'], state='readonly', width=14).pack(side=tk.RIGHT)
         r = _row(c1); tk.Label(r, text='언어', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
         self.lang_var = tk.StringVar(value='한국어 (ko)'); self.lang_combo = ttk.Combobox(r, textvariable=self.lang_var, values=['한국어 (ko)', '영어 (en)', '일본어 (ja)', '중국어 (zh)', '자동 감지 (auto)'], state='readonly', width=12); self.lang_combo.pack(side=tk.RIGHT)
         
@@ -500,6 +500,13 @@ class CustomModelApp:
                         if valid:
                             self.transcript_manager.save_state()
                             self.results_data[idx][key] = round(nv, 3)
+                            
+                            # [시니어 최적화] 내부 단어 타임스탬프 동기화 (Word Block 뷰와 일관성 유지)
+                            words = self.results_data[idx].get('words', [])
+                            if words:
+                                if key == 's': words[0]['s'] = nv
+                                else: words[-1]['e'] = nv
+
                             self.tree.set(item, column=col, value=self.format_time(nv))
                             self.player.set_time(int(nv * 1000))
                             self.player.play()
@@ -692,6 +699,9 @@ class CustomModelApp:
         if "auto" in device_val: mapped_dev = "auto"
         elif "cuda" in device_val: mapped_dev = "cuda"
         elif "mps" in device_val: mapped_dev = "mps"
+        elif "25%" in device_val: mapped_dev = "cpu_25"
+        elif "50%" in device_val: mapped_dev = "cpu_50"
+        elif "75%" in device_val: mapped_dev = "cpu_75"
         else: mapped_dev = "cpu"
 
         analysis_options = AnalysisSettings(
@@ -763,12 +773,32 @@ class CustomModelApp:
             self._open_editor(item, x, y, max(w, 200), max(h, 20))
 
 
-    def rebuild_tree_and_render(self):
+    def rebuild_tree_and_render(self, fast=False):
+        # [시니어 최적화] Treeview 갱신은 충분히 빠르지만, Canvas 전체 재랜더링은 무겁습니다.
+        # Ctrl+휠 조절 시에는 fast=True를 넘겨 Treeview만 갱신합니다.
+        
+        # 현재 선택된 아이템 기억 (스크롤 유지를 위함)
+        selected_idx = -1
+        sel = self.tree.selection()
+        if sel:
+            val = self.tree.item(sel[0])['values']
+            if val: selected_idx = int(val[0]) - 1
+
         self.tree.delete(*self.tree.get_children())
         for i, r in enumerate(self.results_data):
             self.tree.insert("", "end", values=(i+1, self.format_time(r.get('s',0)), self.format_time(r.get('e',0)), r.get('t','')))
-        if getattr(self, "notebook", None) and self.notebook.index(self.notebook.select()) == 1:
-            self.block_editor.render_block_view()
+        
+        # 선택 상태 복구
+        if selected_idx != -1:
+            for item in self.tree.get_children():
+                if int(self.tree.item(item)['values'][0]) - 1 == selected_idx:
+                    self.tree.selection_set(item)
+                    break
+
+        if not fast:
+            if getattr(self, "notebook", None) and self.notebook.index(self.notebook.select()) == 1:
+                self.block_editor.render_block_view()
+        
         self.apply_preview_subtitles(force_reload=True)
 
 
@@ -981,11 +1011,27 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             curr_ms = self.player.get_time()
             total_ms = self.player.get_length()
             
-            if curr_ms >= 0 and total_ms > 0:
-                c_m, c_s = divmod(int(curr_ms/1000), 60); t_m, t_s = divmod(int(total_ms/1000), 60); self.lbl_time.config(text=f"{c_m:02d}:{c_s:02d} / {t_m:02d}:{t_s:02d}")
+            # [시니어 최적화] VLC 타이머의 해상도 한계(약 250ms) 극복을 위한 파이썬 내부 밀리초(High-Precision) 프레임 보간
+            import time
+            if not hasattr(self, '_last_vlc_ms'):
+                self._last_vlc_ms = curr_ms
+                self._vlc_clock = time.time()
+                self._smooth_ms = curr_ms
+            
+            if curr_ms != self._last_vlc_ms:
+                self._last_vlc_ms = curr_ms
+                self._vlc_clock = time.time()
+                self._smooth_ms = curr_ms
+            elif self.player.is_playing() and not self.is_seeking:
+                self._smooth_ms = curr_ms + (time.time() - self._vlc_clock) * 1000.0
+            else:
+                self._smooth_ms = curr_ms
+            
+            if self._smooth_ms >= 0 and total_ms > 0:
+                c_m, c_s = divmod(int(self._smooth_ms/1000), 60); t_m, t_s = divmod(int(total_ms/1000), 60); self.lbl_time.config(text=f"{c_m:02d}:{c_s:02d} / {t_m:02d}:{t_s:02d}")
                 
-                # [사용자 요청] 현재 재생 중인 자막 찾기 및 강조
-                curr_sec = curr_ms / 1000.0
+                # [사용자 요청] 현재 재생 중인 자막 찾기 및 강조 (이제 초정밀 시계 사용)
+                curr_sec = self._smooth_ms / 1000.0
                 active_idx = -1
                 for i, r in enumerate(self.results_data):
                     if r['s'] <= curr_sec <= r['e']:
@@ -1010,10 +1056,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 elif not hasattr(self, '_last_active_idx'):
                     self._last_active_idx = -2 # 초기화
 
+                if hasattr(self, 'block_editor'):
+                    self.block_editor.set_active_time(curr_sec)
+
             if hasattr(self, 'btn_play'): self.btn_play.config(text=self.ICON_PAUSE if self.player.is_playing() else self.ICON_PLAY)
         
-        # 실시간성 향상을 위해 100ms 주기로 변경
-        self.root.after(100, self.update_loop)
+        # 실시간성 향상을 위해 16ms 주기로 변경 (초당 ~60프레임)
+        self.root.after(16, self.update_loop)
     def _add_sash_handle(self, paned, orient='h'):
         """PanedWindow의 Sash 위치에 마우스 호버 시 반응하는 시각적 핸들(Pill)을 추가"""
         C = self.C

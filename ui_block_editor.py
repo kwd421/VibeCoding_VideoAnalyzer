@@ -68,14 +68,16 @@ class UIBlockEditor:
 
     def on_block_scroll(self, event):
         # [사용자 요청] Ctrl+휠: 단어 블록 또는 행/시간 미세 조정 및 즉시 재생
-        if event.state & 0x4:
-            x, y = self.block_canvas.canvasx(event.x), self.block_canvas.canvasy(event.y)
-            item = self.block_canvas.find_closest(x, y)
-            tags = self.block_canvas.gettags(item)
+        if event.state & 0x4: # Ctrl key
+            # [시니어 수정] 캔버스 좌표 점검 (스크롤 대응)
+            cx, cy = self.block_canvas.canvasx(event.x), self.block_canvas.canvasy(event.y)
+            item = self.block_canvas.find_closest(cx, cy)
+            if not item: return "break"
+            tags = self.block_canvas.gettags(item[0])
             
-            # 1. 개별 단어 블록 감지
+            # 1. 단어 블록 태그 (예: 1_2)
             word_tag = next((t for t in tags if "_" in t and not t.startswith("row_") and not t.startswith("time_") and t not in ["current", "word_block"]), None)
-            # 2. 시작/종료 시간 태그 감지
+            # 2. 시작/종료 시간 텍스트 태그 (예: time_s_0)
             time_tag = next((t for t in tags if t.startswith("time_")), None)
             # 3. 행 전체 태그 감지
             row_tag = next((t for t in tags if t.startswith("row_")), None)
@@ -86,49 +88,57 @@ class UIBlockEditor:
                     results_data = self.transcript_manager.get_all()
                     
                     if word_tag:
-                        # --- 개별 단어 조절 ---
+                        # --- 개별 단어 조절 (알고리즘 리스트뷰와 통합) ---
                         idx, w_idx = map(int, word_tag.split("_"))
-                        bbox = self.block_canvas.bbox(item)
-                        if bbox:
-                            mid_x = (bbox[0] + bbox[2]) / 2
-                            key = 's' if x < mid_x else 'e'
-                            target_word = results_data[idx]['words'][w_idx]
-                            nv = max(0, target_word[key] + delta)
-                            valid = True
-                            if key == 's':
-                                if nv >= target_word['e'] or (w_idx > 0 and nv < results_data[idx]['words'][w_idx-1]['e']) or (w_idx == 0 and idx > 0 and nv < results_data[idx-1]['e']): valid = False
-                            else:
-                                if nv <= target_word['s'] or (w_idx < len(results_data[idx]['words']) - 1 and nv > results_data[idx]['words'][w_idx+1]['s']) or (w_idx == len(results_data[idx]['words']) - 1 and idx < len(results_data) - 1 and nv > results_data[idx+1]['s']): valid = False
-                            if valid:
-                                self.transcript_manager.save_state()
-                                target_word[key] = round(nv, 3)
-                                results_data[idx]['s'] = min(w['s'] for w in results_data[idx]['words'])
-                                results_data[idx]['e'] = max(w['e'] for w in results_data[idx]['words'])
-                                self._sync_and_play(nv)
+                        mid_x = (self.block_canvas.bbox(item)[0] + self.block_canvas.bbox(item)[2]) / 2
+                        key = 's' if cx < mid_x else 'e'
+                        target_word = results_data[idx]['words'][w_idx]
+                        nv = max(0, target_word[key] + delta)
+                        
+                        valid = True
+                        if key == 's':
+                            # 이전 단어의 종료 시간(또는 이전 행의 종료 시간)보다 앞서지 않게
+                            if nv >= target_word['e']: valid = False
+                            if w_idx > 0 and nv < results_data[idx]['words'][w_idx-1]['e']: valid = False
+                            if w_idx == 0 and idx > 0 and nv < results_data[idx-1]['e']: valid = False
+                        else:
+                            # 다음 단어의 시작 시간(또는 다음 행의 시작 시간)보다 늦지 않게
+                            if nv <= target_word['s']: valid = False
+                            if w_idx < len(results_data[idx]['words']) - 1 and nv > results_data[idx]['words'][w_idx+1]['s']: valid = False
+                            if w_idx == len(results_data[idx]['words']) - 1 and idx < len(results_data) - 1 and nv > results_data[idx+1]['s']: valid = False
+                        
+                        if valid:
+                            self.transcript_manager.save_state()
+                            target_word[key] = round(nv, 3)
+                            # 단어 조절이 완료되면 전체 행의 s, e도 갱신
+                            results_data[idx]['s'] = min(w['s'] for w in results_data[idx]['words'])
+                            results_data[idx]['e'] = max(w['e'] for w in results_data[idx]['words'])
+                            self._sync_and_play(nv, fast=True, idx_to_update=idx)
                     
                     elif time_tag:
-                        # --- [사용자 요청] 시작/종료 시간 Ctrl+휠 조절 ---
-                        parts = time_tag.split("_")  # time_s_0 or time_e_0
-                        key = parts[1]  # 's' or 'e'
-                        idx = int(parts[2])
+                        # --- 시작/종료 시간 조절 (리스트뷰와 100% 동일) ---
+                        parts = time_tag.split("_")
+                        key, idx = parts[1], int(parts[2])
                         nv = max(0, results_data[idx][key] + delta)
                         valid = True
                         if key == 's':
                             if nv >= results_data[idx]['e'] or (idx > 0 and nv < results_data[idx-1]['e']): valid = False
-                        else:
+                        else: # key == 'e'
                             if nv <= results_data[idx]['s'] or (idx < len(results_data)-1 and nv > results_data[idx+1]['s']): valid = False
+                        
                         if valid:
                             self.transcript_manager.save_state()
                             results_data[idx][key] = round(nv, 3)
+                            # 리전 조절 시 내부 단어도 강제 싱크
                             if results_data[idx].get('words'):
                                 if key == 's': results_data[idx]['words'][0]['s'] = nv
                                 else: results_data[idx]['words'][-1]['e'] = nv
-                            self._sync_and_play(nv)
+                            self._sync_and_play(nv, fast=True, idx_to_update=idx)
                     
                     elif row_tag:
-                        # --- 행 전체 조절 ---
+                        # --- 행 배경 조절 ---
                         idx = int(row_tag.split("_")[1])
-                        key = 's' if x < 120 else 'e'
+                        key = 's' if cx < 120 else 'e'
                         nv = max(0, results_data[idx][key] + delta)
                         valid = True
                         if key == 's':
@@ -141,7 +151,7 @@ class UIBlockEditor:
                             if results_data[idx].get('words'):
                                 if key == 's': results_data[idx]['words'][0]['s'] = nv
                                 else: results_data[idx]['words'][-1]['e'] = nv
-                            self._sync_and_play(nv)
+                            self._sync_and_play(nv, fast=True, idx_to_update=idx)
                 except: pass
             return "break"
         
@@ -223,11 +233,33 @@ class UIBlockEditor:
         entry.bind("<FocusOut>", _save)
         entry.bind("<Escape>", lambda e: [entry.destroy(), self.render_block_view()])
 
-    def _sync_and_play(self, time_val):
-        self.rebuild_tree_and_render()
+    def _sync_and_play(self, time_val, fast=False, idx_to_update=None):
+        if fast and idx_to_update is not None:
+            # [시니어 최적화] 전체 리빌드를 건너뛰고 캔버스 라벨만 즉시 수정 (렉 방지)
+            self._update_canvas_times_live(idx_to_update)
+            self.rebuild_tree_and_render(fast=True)
+        else:
+            self.rebuild_tree_and_render(fast=False)
+            
         if self.player:
             self.player.set_time(int(time_val * 1000))
             self.player.play()
+
+    def _update_canvas_times_live(self, idx):
+        """캔버스 전체를 다시 그리지 않고 특정 행의 시간 텍스트만 실시간으로 교체"""
+        results_data = self.transcript_manager.get_all()
+        if idx < 0 or idx >= len(results_data): return
+        r = results_data[idx]
+        
+        # 시작 시간 라벨 업데이트
+        s_tag = f"time_s_{idx}"
+        items_s = self.block_canvas.find_withtag(s_tag)
+        if items_s: self.block_canvas.itemconfig(items_s[0], text=self.format_time(r['s']))
+        
+        # 종료 시간 라벨 업데이트
+        e_tag = f"time_e_{idx}"
+        items_e = self.block_canvas.find_withtag(e_tag)
+        if items_e: self.block_canvas.itemconfig(items_e[0], text=self.format_time(r['e']))
 
     def set_active_row(self, idx, follow=False):
         """현재 재생 중인 행의 번호를 설정하고 배경색을 즉시 갱신"""
@@ -248,6 +280,42 @@ class UIBlockEditor:
             self.block_canvas.itemconfig(f"row_{idx}", fill=BC['active'])
             # 대사 줄이 화면 영역을 벗어나면 자동 스크롤 추적 (요청 시에만)
             if follow: self._see_row(idx)
+
+    def set_active_time(self, curr_sec):
+        """현재 재생 시간에 해당하는 단어 블록을 찾아 파란색으로 강조"""
+        if not hasattr(self, 'active_word_id'): self.active_word_id = None
+        if not hasattr(self, 'active_word_bg'): self.active_word_bg = None
+        
+        target_idx, target_w_idx = None, None
+        if self.active_row_idx != -1:
+            idx = self.active_row_idx
+            results_data = self.transcript_manager.get_all()
+            if 0 <= idx < len(results_data):
+                words = results_data[idx].get('words', [])
+                for i, w in enumerate(words):
+                    # VLC 플레이어 특성상 get_time()이 약 250ms 간격으로 업데이트되어 
+                    # 0.2초 이하의 짧은 단어는 아예 건너뛰어져 버리는 현상을 보정하기 위해 허용 범위 확대
+                    if w['s'] - 0.15 <= curr_sec <= w['e'] + 0.15:
+                        target_idx, target_w_idx = idx, i
+                        # 겹치는 허용 범위 내에서는 가장 마지막에 말해진(최신) 단어를 가리키기 위해 뒤쪽 단어를 우선시함. 즉 계속 돌림.
+        
+        new_active_id = f"{target_idx}_{target_w_idx}" if target_idx is not None else None
+        
+        # 현재 활성 블록 변경 시 색상 전환
+        if getattr(self, 'active_word_id', None) != new_active_id:
+            # 이전 활성 블록 색상 원상 복구
+            if self.active_word_id:
+                old_rect = self.block_canvas.find_withtag(f"word_block&&{self.active_word_id}")
+                if old_rect and self.active_word_bg:
+                    self.block_canvas.itemconfig(old_rect[0], fill=self.active_word_bg)
+            
+            # 새 블록 강조
+            self.active_word_id = new_active_id
+            if new_active_id:
+                rects = self.block_canvas.find_withtag(f"word_block&&{new_active_id}")
+                if rects:
+                    self.active_word_bg = self.block_canvas.itemcget(rects[0], 'fill')
+                    self.block_canvas.itemconfig(rects[0], fill='#007AFF') # System Blue
 
     def _see_row(self, idx):
         """[사용자 요청] 현재 화면에 보이는 마지막 대사가 끝난 후에만 스크롤 (페이지 단위)"""
@@ -270,10 +338,11 @@ class UIBlockEditor:
                         self.block_canvas.yview_moveto(r_map['y_start'] / total_h)
         except: pass
 
-    def rebuild_tree_and_render(self):
+    def rebuild_tree_and_render(self, fast=False):
         # 트리뷰 갱신 요청을 부모에게 전달
-        self.on_tree_rebuild_request()
-        self.render_block_view()
+        self.on_tree_rebuild_request(fast=fast)
+        if not fast:
+            self.render_block_view()
 
     def on_block_right_click(self, event):
         x, y = self.block_canvas.canvasx(event.x), self.block_canvas.canvasy(event.y)
@@ -545,10 +614,12 @@ class UIBlockEditor:
                     # [사용자 요청 5] 블록 간 간격 5px로 축소
                     x_offset += w_width + 5
                     
-                    def _enter(e, r_id=rect_id):
-                        self.block_canvas.itemconfig(r_id, fill='#FFD700')
-                    def _leave(e, r_id=rect_id, c=row_word_bg):
-                        self.block_canvas.itemconfig(r_id, fill=c)
+                    def _enter(e, r_id=rect_id, cid=f"{idx}_{w_idx}"):
+                        if getattr(self, 'active_word_id', None) != cid:
+                            self.block_canvas.itemconfig(r_id, fill='#FFD700')
+                    def _leave(e, r_id=rect_id, c=row_word_bg, cid=f"{idx}_{w_idx}"):
+                        if getattr(self, 'active_word_id', None) != cid:
+                            self.block_canvas.itemconfig(r_id, fill=c)
                     self.block_canvas.tag_bind(rect_id, "<Enter>", _enter)
                     self.block_canvas.tag_bind(rect_id, "<Leave>", _leave)
                     self.block_canvas.tag_bind(text_id, "<Enter>", _enter)

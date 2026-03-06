@@ -56,10 +56,20 @@ class AnalysisController:
             
             else:
                 gen, total_dur = self.engine.transcribe_stream_raw(audio_data, stop_ev, options=options)
-                last_upd, last_prog, ema_speed = time.time(), 0.0, 0.0
                 for r in gen:
                     if stop_ev.is_set(): break
                     
+                    # --- [추가] 하트비트를 수신하여 안정적인 ETA 계산 ---
+                    if isinstance(r, dict) and r.get("is_heartbeat"):
+                        prog = r["progress"]
+                        elapsed = time.time() - start_time
+                        if prog > 0.5: # 초기 튐 현상 방지
+                            eta = int((elapsed / prog) * (100 - prog))
+                            eta_str = f" (남은 시간: {eta//60}분 {eta%60}초)" if eta >= 0 else " (남은 시간 계산 중...)"
+                            self.dispatcher.emit("progress", {"value": prog, "text": f"Whisper 분석 중 ({int(prog)}%){eta_str}"})
+                        continue
+
+                    # (기존의 자막 분할 및 추가 로직)
                     text = r['t'].strip()
                     if len(text) > max_chars:
                         chunks = self.transcript_manager.smart_split_text(text, max_chars)
@@ -72,14 +82,6 @@ class AnalysisController:
                             curr_ratio += ratio
                     else:
                         self.transcript_manager.add_segment(r, dispatch_ui)
-                    
-                    prog = (r['e'] / total_dur) * 100; curr_t = time.time(); delta_t, delta_p = curr_t - last_upd, prog - last_prog
-                    if delta_t > 0.5 and delta_p > 0:
-                        curr_s = delta_p / delta_t
-                        ema_speed = curr_s if ema_speed == 0 else (ema_speed * 0.8) + (curr_s * 0.2)
-                        last_upd, last_prog = curr_t, prog
-                    eta_str = f" (남은 시간: {int((100-prog)/ema_speed)//60}분 {int((100-prog)/ema_speed)%60}초)" if ema_speed > 0 else " (남은 시간 계산 중...)"
-                    self.dispatcher.emit("progress", {"value": prog, "text": f"Whisper 분석 중 ({int(prog)}%){eta_str}"})
                 
                 if not stop_ev.is_set(): 
                     is_combi = "컷편집" in mode

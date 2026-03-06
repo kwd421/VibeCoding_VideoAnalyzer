@@ -38,6 +38,8 @@ class HyperTranscriptionEngine:
         
     def _detect_best_device(self, user_choice="auto"):
         """[시니어 하드웨어 분석] 환경에 맞는 텐서 연산 장치 동적 스캔"""
+        if user_choice.startswith("cpu"):
+            return "cpu"
         if user_choice != "auto":
             return user_choice
         if torch.cuda.is_available():
@@ -45,7 +47,18 @@ class HyperTranscriptionEngine:
         if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             return "mps"
         return "cpu"
+
+    def _get_target_cores(self, device_mode="auto"):
+        total_cores = os.cpu_count() or 4
+        if "25" in device_mode: return max(1, int(total_cores * 0.25))
+        if "50" in device_mode: return max(1, int(total_cores * 0.50))
+        if "75" in device_mode: return max(1, int(total_cores * 0.75))
+        return max(1, int(total_cores * 0.50)) # 기본값 50%
+
     def get_model(self, device_mode="auto"):
+        target_threads = self._get_target_cores(device_mode)
+        
+        # 모델 리로드 조건: 디바이스가 바뀌었거나, CPU 모드인데 쓰레드 설정이 달라진 경우
         if self.fw_model is None or self.device_info != device_mode:
             self.device_info = device_mode
             best_device = self._detect_best_device(device_mode)
@@ -55,7 +68,7 @@ class HyperTranscriptionEngine:
             
             # [시니어 최적화] Multi-worker 환경에서 Thread 뻥튀기를 방지하기 위해 Total Thread 제한
             workers = 2 if ct2_dev == "cpu" else 1
-            threads_per_worker = max(1, self.cpu_cores // workers)
+            threads_per_worker = max(1, target_threads // workers)
             
             self.fw_model = WhisperModel(self.model_id, device=ct2_dev, compute_type=c_type, cpu_threads=threads_per_worker, num_workers=workers)
         return self.fw_model
@@ -67,7 +80,8 @@ class HyperTranscriptionEngine:
 
     def get_vad_model(self, device_mode="auto"):
         if self.vad_model is None:
-            torch.set_num_threads(self.cpu_cores)
+            target_threads = self._get_target_cores(device_mode)
+            torch.set_num_threads(target_threads)
             # Silero VAD 로드 패치 (Warning 방지)
             import warnings
             with warnings.catch_warnings():
@@ -354,5 +368,7 @@ class HyperTranscriptionEngine:
                 
                 gc.collect()
                 start_idx = end_idx
+                # --- [추가] 물리적 오디오 처리 위치 기반 진행률 강제 보고 ---
+                yield {"is_heartbeat": True, "progress": (start_idx / total_samples) * 100}
         
         return safe_generator(), total_dur
