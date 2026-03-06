@@ -159,6 +159,8 @@ class CustomModelApp:
         self.is_seeking = False
         self.ICON_PLAY = chr(9654); self.ICON_PAUSE = chr(9208)
         self.dispatcher = EventEmitter()
+        # [시니어] 앱의 실행 경로 정밀 추적 (System32 등 엉뚱한 CWD 방어)
+        self.base_dir = os.path.dirname(os.path.abspath(__file__))
         self.controller = AnalysisController(self.engine, self.video_editor, self.transcript_manager, self.dispatcher)
         self.setup_ui()
         self.player = VideoPlayer(self.video_canvas.winfo_id())
@@ -166,6 +168,30 @@ class CustomModelApp:
         self.bind_events()
         self.load_engine_async()
         self.update_loop()
+        
+        # [시니어] 프로그램 종료 시 찌꺼기 파일 청소 프로토콜 등록
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def on_closing(self):
+        """프로그램 종료 전 찌꺼기 파일 및 스레드 정리"""
+        try:
+            import glob
+            import shutil
+            # 1. 임시 ASS 자막 파일 삭제
+            for f in glob.glob(os.path.join(self.base_dir, "export_burn_*.ass")):
+                try: os.remove(f)
+                except: pass
+            
+            # 2. 임시 폴더(Fast Mode 등) 삭제
+            for d in glob.glob(os.path.join(self.base_dir, "temp_fast_*")):
+                try: shutil.rmtree(d, ignore_errors=True)
+                except: pass
+                
+            # 3. 스레드 중지 신호 및 종료
+            self.stop_event.set()
+        except: pass
+        finally:
+            self.root.destroy()
 
     def bind_events(self):
         self.dispatcher.on("progress", lambda x: self.root.after(0, lambda: self._on_progress(x)))
@@ -264,15 +290,16 @@ class CustomModelApp:
         
         self.notebook = ttk.Notebook(timeline_zone)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-        self.tab_tree = tk.Frame(self.notebook, bg=C['bg2'])
-        self.notebook.add(self.tab_tree, text=' 📋 자막 리스트 ')
-        
         self.tab_canvas = tk.Frame(self.notebook, bg=C['bg'])
         self.notebook.add(self.tab_canvas, text=' 🧩 단어 블록 ')
+        
+        self.tab_tree = tk.Frame(self.notebook, bg=C['bg2'])
+        self.notebook.add(self.tab_tree, text=' 📋 자막 리스트 ')
         
         # [사용자 요청] 자막 설정 탭 별도 분리
         self.tab_style = tk.Frame(self.notebook, bg=C['bg'])
         self.notebook.add(self.tab_style, text=' ⚙️ 자막 설정 ')
+        self.notebook.select(self.tab_canvas)
         
         # ── 자막 리스트 Treeview 설정 ──
         self.tree = ttk.Treeview(self.tab_tree, columns=('no','start','end','text'), show='headings')
@@ -285,10 +312,10 @@ class CustomModelApp:
         self.block_editor = UIBlockEditor(self.tab_canvas, self.root, self.transcript_manager, lambda: self.player, self.rebuild_tree_and_render)
         def _on_tab_changed(e):
             idx = self.notebook.index(self.notebook.select())
-            if idx == 1:
+            if idx == 0: # 단어 블록
                 self.block_editor.render_block_view()
                 self.block_editor.block_canvas.yview_moveto(self.tree.yview()[0])
-            elif idx == 0:
+            elif idx == 1: # 자막 리스트
                 self.tree.yview_moveto(self.block_editor.block_canvas.yview()[0])
         self.notebook.bind('<<NotebookTabChanged>>', _on_tab_changed)
         
@@ -341,7 +368,9 @@ class CustomModelApp:
         self.btn_stop = tk.Button(c2, text='  작업 중지  ', command=self.on_stop_action, bg=C['bg3'], fg=C['red'], font=_fb, relief='flat', bd=0, compound='center', state=tk.DISABLED, pady=5, cursor='hand2'); self.btn_stop.pack(fill=tk.X); _hover(self.btn_stop, C['bg3'], C['border'])
         self.lbl_status = LblMarquee(c2, text='준비됨', fg=C['green'], bg=C['bg2'], font=_f); self.lbl_status.pack(fill=tk.X, pady=(6,0))
         self.progress_var = tk.DoubleVar(); ttk.Progressbar(c2, variable=self.progress_var).pack(fill=tk.X, pady=(4,0))
+        self.use_burn_sub_var = tk.BooleanVar(value=False)
         self.save_frame = tk.Frame(c2, bg=C['bg2']); self.save_frame.pack(fill=tk.X, pady=4); self.save_frame.pack_forget()
+        tk.Checkbutton(self.save_frame, text='🔥 영상에 자막 입히기 (Re-encode)', variable=self.use_burn_sub_var, bg=C['bg2'], selectcolor=C['bg3'], activebackground=C['bg2'], font=_f, relief=tk.FLAT, bd=0).pack(anchor=tk.W, pady=(0, 4))
         btn_box = tk.Frame(self.save_frame, bg=C['bg2']); btn_box.pack(fill=tk.X)
         self.btn_fast_save = tk.Button(btn_box, text='  🚀 초고속  ', command=lambda: self.start_export(fast=True), bg=C['purple'], fg='white', font=_f, relief='flat', bd=0, compound='center', pady=6, cursor='hand2'); self.btn_fast_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0,2)); _hover(self.btn_fast_save, C['purple'], '#9342B5')
         self.btn_pro_save = tk.Button(btn_box, text='  🎯 정밀  ', command=lambda: self.start_export(fast=False), bg=C['bg3'], fg=C['text'], font=_f, relief='flat', bd=0, compound='center', pady=6, cursor='hand2'); self.btn_pro_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2); _hover(self.btn_pro_save, C['bg3'], C['border'])
@@ -360,6 +389,7 @@ class CustomModelApp:
         _sep(c3)
         self.use_silero_vad_var = tk.BooleanVar(value=True); tk.Checkbutton(c3, text='외부 VAD (Silero)', variable=self.use_silero_vad_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         self.use_whisper_vad_var = tk.BooleanVar(value=True); tk.Checkbutton(c3, text='내부 VAD (Whisper)', variable=self.use_whisper_vad_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
+        self.use_whisperx_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🎯 WhisperX 단어 싱크 보정', variable=self.use_whisperx_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         _sep(c3)
         
         r = _row(c3); tk.Label(r, text='무음 길이', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
@@ -715,6 +745,7 @@ class CustomModelApp:
             use_word_timestamps=True,
             use_whisper_vad=self.use_whisper_vad_var.get(),
             use_silero_vad=self.use_silero_vad_var.get(),
+            use_whisperx_align=getattr(self, 'use_whisperx_var', tk.BooleanVar(value=False)).get(),
             remove_punctuation=getattr(self, 'remove_punctuation_var', tk.BooleanVar(value=False)).get(),
             device_mode=mapped_dev
         )
@@ -732,8 +763,72 @@ class CustomModelApp:
         if save_path:
             for b in [self.btn_fast_save, self.btn_pro_save, self.btn_xml_save]: b.config(state=tk.DISABLED)
             self.btn_stop.config(state=tk.NORMAL); self.progress_var.set(0)
+            
+            # [시니어] 자막 합치기(Burn) 옵션 처리
+            ass_path_final = None
+            if self.use_burn_sub_var.get():
+                try:
+                    # 1. 병합 세그먼트 정보 계산
+                    merged, _ = self.video_editor.get_merged_segments_info(self.results_data)
+                    
+                    # 2. ASS 스타일/헤더 정보 수집 (apply_preview_subtitles 로직 재사용)
+                    # --- HEX(#RRGGBB) → ASS(&H00BBGGRR&) 변환 ---
+                    def hex_to_ass(hex_color):
+                        hex_color = hex_color.lstrip('#')
+                        r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+                        return f"&H00{b:02X}{g:02X}{r:02X}&"
+                    
+                    font_name = self.sub_font.get() if hasattr(self, 'sub_font') else '맑은 고딕'
+                    font_size = self.sub_font_size.get() if hasattr(self, 'sub_font_size') else 40
+                    ass_primary = hex_to_ass(self.sub_color_f.get() if hasattr(self, 'sub_color_f') else '#ffffff')
+                    ass_outline = hex_to_ass(self.sub_color_o.get() if hasattr(self, 'sub_color_o') else '#000000')
+                    ass_shadow = hex_to_ass(self.sub_color_s.get() if hasattr(self, 'sub_color_s') else '#000000')
+                    outline_w = self.sub_outline.get() if hasattr(self, 'sub_outline') else 3
+                    shadow_w = self.sub_shadow.get() if hasattr(self, 'sub_shadow') else 3
+                    margin_v = self.sub_y_pos.get() if hasattr(self, 'sub_y_pos') else 50
+                    
+                    ass_header = f"""[Script Info]\nTitle: Export\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,{font_name},{font_size},{ass_primary},&H000000FF&,{ass_outline},{ass_shadow},-1,0,0,0,100,100,0,0,1,{outline_w},{shadow_w},2,10,10,{margin_v},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"""
+                    
+                    def fmt_ass_time(sec):
+                        h, m, s, cs = int(sec//3600), int((sec%3600)//60), int(sec%60), int((sec%1)*100)
+                        return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+                    # 필러 처리 로직 (apply_preview_subtitles 에 추가한 것과 동일)
+                    _FILLERS = {'어', '음', '아', '으', '에', '이', '오', '우', '그', '저', '뭐', '막', '좀', '그냥'}
+                    def _get_display_start(r):
+                        words = r.get('words', [])
+                        if not words: return r['s']
+                        for w in words:
+                            wt = w['word'].strip() if isinstance(w, dict) else w.word.strip()
+                            wclean = wt.replace(' ', '').replace('.', '').replace(',', '').replace('-', '').replace('~', '')
+                            if not wclean: continue
+                            if wclean in _FILLERS or (len(wclean) <= 3 and len(set(wclean)) <= 1): continue
+                            ws = w['s'] if isinstance(w, dict) else w.s
+                            if ws - r['s'] > 1.5: return r['s']
+                            return ws
+                        return r['s']
+
+                    # 3. 타임라인 매핑 (Cut 영상에 맞게 자막 시간 이동)
+                    lines = []
+                    current_out_time = 0.0
+                    for m_start, m_end in merged:
+                        for r in self.results_data:
+                            # 세그먼트가 이 병합 구간 안에 있는지 확인
+                            if r['s'] >= m_start - 0.001 and r['e'] <= m_end + 0.001:
+                                rel_s = _get_display_start(r) - m_start # 필러 보정 포함
+                                rel_e = r['e'] - m_start
+                                s_out, e_out = current_out_time + rel_s, current_out_time + rel_e
+                                lines.append(f"Dialogue: 0,{fmt_ass_time(s_out)},{fmt_ass_time(e_out)},Default,,0,0,0,,{r['t']}")
+                        current_out_time += (m_end - m_start)
+
+                    ass_path_final = os.path.join(self.base_dir, f"export_burn_{int(time.time())}.ass")
+                    with open(ass_path_final, 'w', encoding='utf-8-sig') as f:
+                        f.write(ass_header); f.write('\n'.join(lines))
+                except Exception as e:
+                    print(f"[Error] Burn ASS Generation failed: {e}")
+            
             settings = {'v_codec': media_info.get('v_codec', 'h264'), 'a_codec': media_info.get('a_codec', 'aac'), 'v_bitrate': f"{media_info.get('v_bitrate', 5000000) // 1000}k", 'a_bitrate': f"{media_info.get('a_bitrate', 128000) // 1000}k", 'fast_mode': fast}
-            threading.Thread(target=self.controller.run_editing, args=(self.current_video_path, save_path, self.results_data, self.stop_event, settings), daemon=True).start()
+            threading.Thread(target=self.controller.run_editing, args=(self.current_video_path, save_path, self.results_data, self.stop_event, settings, ass_path_final), daemon=True).start()
 
     def on_export_xml(self):
         save_path = filedialog.asksaveasfilename(defaultextension=".xml", filetypes=[("Final Cut Pro XML", "*.xml")], initialfile=f"Timeline_{os.path.splitext(os.path.basename(self.current_video_path))[0]}.xml")
@@ -940,9 +1035,35 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 cs = int((sec % 1) * 100)
                 return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
             
+            _FILLERS = {'어', '음', '아', '으', '에', '이', '오', '우', '그', '저', '뭐', '막', '좀', '그냥'}
+
+            def _get_display_start(r):
+                """words가 있으면 첫 실제 단어의 시작 시간을 반환, 없으면 r['s'] 그대로"""
+                words = r.get('words', [])
+                if not words:
+                    return r['s']
+                for w in words:
+                    # words 항목은 dict 또는 dataclass 두 형태가 혼재하므로 둘 다 처리
+                    wt = w['word'].strip() if isinstance(w, dict) else w.word.strip()
+                    # [시니어] Whisper 특유의 문장부호(--, ...) 및 공백 제거
+                    wclean = wt.replace(' ', '').replace('.', '').replace(',', '').replace('-', '').replace('~', '')
+                    if not wclean: continue
+                    
+                    # 필러 단어이거나 1~3글자 반복(어어, 어어어 등)이면 건너뜜
+                    if wclean in _FILLERS or (len(wclean) <= 3 and len(set(wclean)) <= 1):
+                        continue
+                        
+                    ws = w['s'] if isinstance(w, dict) else w.s
+                    # 세그먼트 시작보다 1.5초 이상 늦으면 원본 유지 (너무 늦게 뜨는 것 방지)
+                    if ws - r['s'] > 1.5:
+                        return r['s']
+                    return ws
+                return r['s']
+
             lines = []
             for i, r in enumerate(self.results_data):
-                s_r, e_r = r['s'], r['e']
+                s_r = _get_display_start(r)  # 실제 단어 기준 표시 시작점
+                e_r = r['e']
                 if i < len(self.results_data) - 1 and e_r >= self.results_data[i+1]['s']:
                     e_r = max(s_r + 0.1, self.results_data[i+1]['s'] - 0.05)
                 lines.append(f"Dialogue: 0,{fmt_ass_time(s_r)},{fmt_ass_time(e_r)},Default,,0,0,0,,{r['t']}")
@@ -950,7 +1071,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             # --- A/B 핑퉁 핫스왓 ---
             suffix = "A" if getattr(self, '_ping_pong', False) else "B"
             self._ping_pong = not getattr(self, '_ping_pong', False)
-            _script_dir = os.path.dirname(os.path.abspath(__file__))
+            _script_dir = self.base_dir
             ass_name = os.path.join(_script_dir, f"temp_preview_{suffix}.ass")
             
             with open(ass_name, 'w', encoding='utf-8-sig') as f:
@@ -1046,12 +1167,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         val = self.tree.item(item)['values']
                         if val and int(val[0]) - 1 == active_idx:
                             self.tree.item(item, tags=('active',))
-                            if current_tab == 0: self.tree.see(item) # 자막 리스트 탭일 때만 스크롤
+                            if current_tab == 1: self.tree.see(item) # 자막 리스트 탭일 때만 스크롤
                         else:
                             self.tree.item(item, tags=())
                     
                     # 단어 블록 강조 (스크롤은 내부 메서드에서 탭 확인 후 수행)
-                    self.block_editor.set_active_row(active_idx, follow= (current_tab == 1))
+                    self.block_editor.set_active_row(active_idx, follow= (current_tab == 0))
                     self._last_active_idx = active_idx
                 elif not hasattr(self, '_last_active_idx'):
                     self._last_active_idx = -2 # 초기화

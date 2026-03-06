@@ -21,6 +21,11 @@ from config_models import AnalysisSettings, TranscriptSegment, TranscriptWord
 from text_sanitizer import TextSanitizer
 from audio_processor import AudioProcessor
 from vision_processor import VisionProcessor
+import whisperx
+import whisperx.utils
+# [시니어] WhisperX 한국어 띄어쓰기 삭제 버그 우회 (Monkey Patch)
+if hasattr(whisperx.utils, "LANGUAGES_WITHOUT_SPACES") and "ko" in whisperx.utils.LANGUAGES_WITHOUT_SPACES:
+    whisperx.utils.LANGUAGES_WITHOUT_SPACES.remove("ko")
 
 class HyperTranscriptionEngine:
     def __init__(self):
@@ -35,6 +40,7 @@ class HyperTranscriptionEngine:
         total_cores = os.cpu_count() or 4
         self.cpu_cores = max(1, int(total_cores * 0.5))
         self.device_info = "auto"
+        self.align_models_cache = {}    # [캐싱] 언어별 WhisperX 정렬 모델
         
     def _detect_best_device(self, user_choice="auto"):
         """[시니어 하드웨어 분석] 환경에 맞는 텐서 연산 장치 동적 스캔"""
@@ -98,6 +104,24 @@ class HyperTranscriptionEngine:
     def get_clip_model(self, device_mode="auto"):
         return self.vision_processor.get_clip_model(device_mode)
 
+    def get_align_model(self, language_code="ko", device_mode="auto"):
+        """WhisperX forced alignment 모델을 lazy load 및 캐싱"""
+        best_device = self._detect_best_device(device_mode)
+        
+        # [시니어] 언어 코드가 불분명하면 ko로 강제 매핑
+        lang_code = language_code if language_code and language_code != "auto" else "ko"
+        
+        if lang_code not in self.align_models_cache:
+            try:
+                print(f"[INFO] WhisperX alignment 모델 로딩 시작: {lang_code} ({best_device})")
+                model_a, metadata = whisperx.load_align_model(language_code=lang_code, device=best_device)
+                self.align_models_cache[lang_code] = (model_a, metadata)
+            except Exception as e:
+                print(f"[ERROR] WhisperX alignment 모델 로드 실패 ({lang_code}): {e}")
+                return None, None
+        
+        return self.align_models_cache[lang_code]
+
     def load_audio_to_memory(self, video_path):
         return AudioProcessor.load_audio_to_memory(video_path, self.ffmpeg_exe)
 
@@ -152,6 +176,7 @@ class HyperTranscriptionEngine:
         use_word_timestamps = options.use_word_timestamps
         use_whisper_vad = options.use_whisper_vad
         use_silero_vad = options.use_silero_vad
+        use_whisperx_align = options.use_whisperx_align
 
         # 소음 제거 적용
         if use_denoise:
@@ -219,11 +244,98 @@ class HyperTranscriptionEngine:
                         segs, _ = model.transcribe(sub_chunk, **transcribe_kwargs)
                         segs_list = list(segs)
                         
+                        # [WhisperX] WhisperX forced alignment로 단어 타임스탬프 보정
+                        if use_whisperx_align and use_word_timestamps and segs_list:
+                            try:
+                                best_dev = self._detect_best_device(device_mode)
+                                model_a, metadata = self.get_align_model(selected_lang, device_mode)
+                                
+                                if model_a is not None:
+                                    # [시니어] 특수기호 에러 우회: 순수 텍스트만 추출하여 전달
+                                    wx_segments = []
+                                    for s in segs_list:
+                                        # 한글, 영어, 숫자, 공백 제외 모두 제거
+                                        clean_txt = re.sub(r'[^\w\s가-힣]', '', s.text).strip()
+                                        wx_segments.append({
+                                            "text": clean_txt if clean_txt else s.text.strip(),
+                                            "start": s.start,
+                                            "end": s.end
+                                        })
+                                    
+                                    # 정렬 실행 (글자 단위 정밀 정렬 활성화)
+                                    aligned_result = whisperx.align(
+                                        wx_segments, 
+                                        model_a, 
+                                        metadata, 
+                                        sub_chunk, 
+                                        best_dev, 
+                                        return_char_alignments=True
+                                    )
+                                    
+                                    # 기존 래퍼 클래스 규격에 맞춰 복구 (AttributeError 방지)
+                                    class _CTCAlignedSeg:
+                                        def __init__(self, orig_seg, new_words):
+                                            self.text = orig_seg.get("text", "")
+                                            self.start = orig_seg.get("start", 0.0)
+                                            self.end = orig_seg.get("end", 0.0)
+                                            class _W:
+                                                def __init__(self, word, s, e):
+                                                    self.word = word
+                                                    self.start = s
+                                                    self.end = e
+                                            self.words = [_W(w['word'], w['start'], w['end']) for w in new_words]
+
+                                    new_segs = []
+                                    for i, seg_dict in enumerate(aligned_result["segments"]):
+                                        # [시니어] 글자(Character) 단위 정밀 조립 및 원본 매핑
+                                        orig_seg = segs_list[i]
+                                        orig_words = getattr(orig_seg, 'words', []) or []
+                                        raw_words = seg_dict.get("words", [])
+                                        
+                                        new_words_data = []
+                                        last_processed_e = seg_dict.get("start", 0.0)
+                                        
+                                        for w_idx, w in enumerate(raw_words):
+                                            # 1. 텍스트 및 기본 폴백 시간 확보 (원본 Faster-Whisper 데이터 참조)
+                                            if w_idx < len(orig_words):
+                                                orig_w = orig_words[w_idx]
+                                                w_word = orig_w.word
+                                                fback_s, fback_e = orig_w.start, orig_w.end
+                                            else:
+                                                w_word = w.get("word", "")
+                                                fback_s = last_processed_e + 0.02
+                                                fback_e = fback_s + 0.15
+
+                                            # 2. 글자 배열(chars)에서 정밀 시작/종료 시간 추출
+                                            char_list = w.get("chars", [])
+                                            valid_chars = [c for c in char_list if "start" in c and "end" in c]
+                                            
+                                            if valid_chars:
+                                                # [정밀] 첫 글자의 시작과 마지막 글자의 종료 시간 사용
+                                                w_start = valid_chars[0]["start"]
+                                                w_end = valid_chars[-1]["end"]
+                                            else:
+                                                # [Fallback 1] 단어 단위 시간 정보 사용
+                                                # [Fallback 2] 원본 Faster-Whisper 시간 혹은 상대 오프셋 사용
+                                                w_start = w.get("start", fback_s)
+                                                w_end = w.get("end", fback_e)
+                                            
+                                            new_words_data.append({"word": w_word, "start": w_start, "end": w_end})
+                                            last_processed_e = w_end
+                                        
+                                        new_segs.append(_CTCAlignedSeg(seg_dict, new_words_data))
+                                    
+                                    segs_list = new_segs
+                                    
+                            except Exception as e:
+                                print(f"[WARN] WhisperX alignment 전체 실패, 기존 결과 유지: {e}")
+                        
                         sub_max_time = vad_e - vad_s
                         offset_vad = offset + vad_s
                         
                         # --- [500년 뱀파이어 절기] 물리적 절대 록온 (Absolute Physical Sync Lock-on) ---
-                        if use_silero_vad:
+                        # [시니어] WhisperX 정밀 싱크가 활성화된 경우 이 로직을 우회하여 보정값 훼손을 방지함
+                        if use_silero_vad and not use_whisperx_align:
                             pad_sec = speech_pad_ms / 1000.0
                             vad_true_start = min(pad_sec, sub_max_time)
                             vad_true_end = max(sub_max_time - pad_sec, 0.0)
@@ -256,7 +368,6 @@ class HyperTranscriptionEngine:
                             if stop_event.is_set(): break
                             text = s.text.strip()
                             if getattr(options, 'remove_punctuation', False):
-                                import re
                                 text = re.sub(r'[.,\-]', '', text).strip()
                             if not text: continue
                             
@@ -284,18 +395,17 @@ class HyperTranscriptionEngine:
                                         
                                     word_str = w.word
                                     if getattr(options, 'remove_punctuation', False):
-                                        import re
                                         word_str = re.sub(r'[.,\-]', '', word_str)
                                         
                                     if w_s - last_e > split_gap_sec:
-                                        t = "".join(w.word for w in curr_words).strip()
+                                        t = " ".join(w.word.strip() for w in curr_words).strip()
                                         if t and last_e > curr_s: extracted.append(TranscriptSegment(s=offset_vad + curr_s, e=offset_vad + last_e, t=t, words=curr_words))
                                         curr_words, curr_s = [TranscriptWord(word=word_str, s=offset_vad + w_s, e=offset_vad + w_e)], w_s
                                     else:
                                         curr_words.append(TranscriptWord(word=word_str, s=offset_vad + w_s, e=offset_vad + w_e))
                                     last_e = w_e
                                     
-                                t = "".join(w.word for w in curr_words).strip()
+                                t = " ".join(w.word.strip() for w in curr_words).strip()
                                 if t and last_e > curr_s: extracted.append(TranscriptSegment(s=offset_vad + curr_s, e=offset_vad + last_e, t=t, words=curr_words))
                                 
                                 for ex in extracted: extracted_results.append(ex)

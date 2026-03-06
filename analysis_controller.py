@@ -97,16 +97,22 @@ class AnalysisController:
             if stop_ev.is_set(): 
                 self.dispatcher.emit("ghost_defense", {})
 
-    def run_editing(self, current_video_path, out_path, results_data, stop_event, settings):
+    def run_editing(self, current_video_path, out_path, results_data, stop_event, settings, burn_ass=None):
         def upd_p(v, eta): self.dispatcher.emit("progress", {"value": v, "text": f"렌더링 중 ({v}%){f' - 남은 시간: {int(eta//60)}분 {int(eta%60)}초' if eta >= 0 else ''}"})
         try:
-            if self.video_editor.cut_silence(current_video_path, out_path, results_data, stop_event, upd_p, v_codec=settings['v_codec'], a_codec=settings['a_codec'], v_bitrate=settings['v_bitrate'], a_bitrate=settings['a_bitrate'], fast_mode=settings['fast_mode']): 
+            if self.video_editor.cut_silence(current_video_path, out_path, results_data, stop_event, upd_p, v_codec=settings['v_codec'], a_codec=settings['a_codec'], v_bitrate=settings['v_bitrate'], a_bitrate=settings['a_bitrate'], fast_mode=settings['fast_mode'], burn_ass=burn_ass): 
                 self.dispatcher.emit("message", {"text": f"작업 완료!\n{out_path}"})
             else: 
                 self.dispatcher.emit("error", {"text": "렌더링 중 오류 발생"})
         except Exception as e: 
             self.dispatcher.emit("error", {"text": f"편집 오류: {str(e)}"})
         finally: 
+            # [시니어] 사용이 끝난 임시 자막 파일(ASS) 삭제
+            if burn_ass:
+                try:
+                    import os
+                    if os.path.exists(burn_ass): os.remove(burn_ass)
+                except: pass
             self.dispatcher.emit("complete", {"text": "작업 완료", "is_vad": True})
 
     def init_engine(self):

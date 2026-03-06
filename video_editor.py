@@ -11,6 +11,8 @@ class VideoEditor:
     def __init__(self):
         self.ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
         self.threads = 8 
+        # [시니어] CWD가 System32 등 엉뚱한 곳일 경우를 대비한 기준 경로 확보
+        self.base_dir = os.path.dirname(os.path.abspath(__file__))
 
     @staticmethod
     def get_merged_segments_info(segments: List[Dict], gap_threshold: float = 2.0) -> Tuple[List[Tuple[float, float]], float]:
@@ -164,30 +166,37 @@ class VideoEditor:
             print(f"XML Export Error: {e}"); return False
 
     def cut_silence(self, input_video, output_video, segments, stop_event=None, progress_callback=None,
-                    v_codec="h264", a_codec="aac", v_bitrate="5000k", a_bitrate="128k", fast_mode=True) -> bool:
+                    v_codec="h264", a_codec="aac", v_bitrate="5000k", a_bitrate="128k", fast_mode=True, burn_ass: str = None) -> bool:
         merged, total_out_duration = self.get_merged_segments_info(segments)
         if not merged or total_out_duration <= 0: return False
 
+        # 자막을 입히려면 반드시 재인코딩이 필요하므로 fast_mode를 강제로 해제함
+        if burn_ass: fast_mode = False
+
         if fast_mode:
             unique_id = int(time.time())
-            temp_dir = os.path.abspath(f"temp_fast_{unique_id}"); os.makedirs(temp_dir, exist_ok=True)
+            temp_dir = os.path.join(self.base_dir, f"temp_fast_{unique_id}")
+            os.makedirs(temp_dir, exist_ok=True)
             list_file_path = os.path.join(temp_dir, "concat.txt")
             try:
+                # [Fast Mode] FFmpeg concat demuxer 방식 (inpoint, outpoint 사용으로 키프레임 손상 방지)
+                abs_input = os.path.abspath(input_video).replace('\\', '/')
                 with open(list_file_path, "w", encoding="utf-8") as f:
-                    for i, (start, end) in enumerate(merged):
+                    for start, end in merged:
                         if stop_event and stop_event.is_set(): return False
                         s_adj, e_adj = max(0, start - 0.05), end + 0.05
-                        chunk_path = os.path.join(temp_dir, f"chunk_{i:04d}.ts")
-                        cmd_cut = [
-                            self.ffmpeg_path, "-y", "-ss", str(s_adj), "-to", str(e_adj), 
-                            "-i", input_video, "-c", "copy", 
-                            "-map", "0:v:0", "-map", "0:a:0", 
-                            "-avoid_negative_ts", "make_zero", "-start_at_zero",
-                            "-f", "mpegts", chunk_path
-                        ]
-                        subprocess.run(cmd_cut, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-                        f.write(f"file '{chunk_path.replace('\\', '/')}'\n")
-                cmd_concat = [self.ffmpeg_path, "-y", "-f", "concat", "-safe", "0", "-i", list_file_path, "-c", "copy", output_video]
+                        # concat demuxer format: file, inpoint, outpoint
+                        f.write(f"file '{abs_input}'\n")
+                        f.write(f"inpoint {s_adj}\n")
+                        f.write(f"outpoint {e_adj}\n")
+                
+                cmd_concat = [
+                    self.ffmpeg_path, "-y",
+                    "-f", "concat", "-safe", "0", "-i", list_file_path,
+                    "-c", "copy",
+                    "-avoid_negative_ts", "make_zero",
+                    output_video
+                ]
                 return self._execute_ffmpeg(cmd_concat, total_out_duration, stop_event, progress_callback)
             except Exception as e: print(f"[FastMode Error] {e}"); return False
             finally:
@@ -202,12 +211,39 @@ class VideoEditor:
                 v_filters.append(f"[0:v]trim=start={s_adj}:end={e_adj},setpts=PTS-STARTPTS[v{i}]")
                 a_filters.append(f"[0:a]atrim=start={s_adj}:end={e_adj},asetpts=PTS-STARTPTS[a{i}]")
                 concat_input += f"[v{i}][a{i}]"
-            filter_complex = "; ".join(v_filters + a_filters) + f"; {concat_input}concat=n={len(merged)}:v=1:a=1[outv][outa]"
-            script_path = os.path.abspath(f"temp_filter_{int(time.time())}.txt")
+            
+            filter_complex = "; ".join(v_filters + a_filters) + f"; {concat_input}concat=n={len(merged)}:v=1:a=1[v_concat][outa]"
+            
+            # 자막 필터 추가: [v_concat]subtitles=ass_path[outv]
+            if burn_ass:
+                # FFmpeg subtitles 필터 경로 이스케이프 (Windows 콜론 및 역슬래시 처리)
+                clean_path = os.path.abspath(burn_ass).replace('\\', '/').replace(':', '\\:')
+                filter_complex += f"; [v_concat]subtitles='{clean_path}'[outv]"
+            else:
+                filter_complex += "; [v_concat]null[outv]"
+            
+            script_path = os.path.join(self.base_dir, f"temp_filter_{int(time.time())}.txt")
             with open(script_path, "w", encoding="utf-8") as f: f.write(filter_complex)
             v_map = {"h264": "libx264", "h265": "libx265", "hevc": "libx265", "av1": "libsvtav1", "vp9": "libvpx-vp9"}
             a_map = {"aac": "aac", "mp3": "libmp3lame", "opus": "libopus", "flac": "flac"}
-            cmd = [self.ffmpeg_path, "-y", "-i", input_video, "-filter_complex_script", script_path, "-map", "[outv]", "-map", "[outa]", "-c:v", v_map.get(v_codec.lower(), "libx264"), "-b:v", v_bitrate, "-preset", "faster", "-threads", str(self.threads), "-c:a", a_map.get(a_codec.lower(), "aac"), "-b:a", a_bitrate, output_video]
+            v_codec_name = v_map.get(v_codec.lower(), "libx264")
+            a_codec_name = a_map.get(a_codec.lower(), "aac")
+            
+            cmd = [
+                self.ffmpeg_path, "-y", "-i", input_video,
+                "-filter_complex_script", script_path,
+                "-map", "[outv]", "-map", "[outa]",
+                "-c:v", v_codec_name,
+                "-pix_fmt", "yuv420p",        # 색상 포맷 통일
+                "-vsync", "1",                # 프레임 싱크 고정
+                "-avoid_negative_ts", "make_zero", # 타임스탬프 리셋
+                "-b:v", v_bitrate,
+                "-preset", "faster",
+                "-threads", str(self.threads),
+                "-c:a", a_codec_name,
+                "-b:a", a_bitrate,
+                output_video
+            ]
             try: return self._execute_ffmpeg(cmd, total_out_duration, stop_event, progress_callback)
             finally:
                 if os.path.exists(script_path): os.remove(script_path)

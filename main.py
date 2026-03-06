@@ -6,10 +6,15 @@ from gui_app import CustomModelApp
 
 def main():
     try:
-        # 이전 작업 찌꺼기 청소
-        for junk in glob.glob("*_temp.wav"):
-            try: os.remove(junk)
-            except: pass
+        # 이전 작업 찌꺼기 청소 (WAV, ASS, Temp Folders)
+        import shutil
+        patterns = ["*_temp.wav", "export_burn_*.ass", "temp_fast_*"]
+        for p in patterns:
+            for junk in glob.glob(p):
+                try:
+                    if os.path.isdir(junk): shutil.rmtree(junk)
+                    else: os.remove(junk)
+                except: pass
         
         root = tk.Tk()
         # v16 기반의 복구된 앱 실행

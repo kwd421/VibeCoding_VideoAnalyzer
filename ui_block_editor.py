@@ -293,11 +293,20 @@ class UIBlockEditor:
             if 0 <= idx < len(results_data):
                 words = results_data[idx].get('words', [])
                 for i, w in enumerate(words):
-                    # VLC 플레이어 특성상 get_time()이 약 250ms 간격으로 업데이트되어 
-                    # 0.2초 이하의 짧은 단어는 아예 건너뛰어져 버리는 현상을 보정하기 위해 허용 범위 확대
-                    if w['s'] - 0.15 <= curr_sec <= w['e'] + 0.15:
+                    ws = w['s'] if isinstance(w, dict) else w.s
+                    we = w['e'] if isinstance(w, dict) else w.e
+                    
+                    # [시니어] 정확히 이 단어 구간 안에 있으면 즉시 선택하고 종료 (0.05초 여유)
+                    if ws <= curr_sec <= we + 0.05:
                         target_idx, target_w_idx = idx, i
-                        # 겹치는 허용 범위 내에서는 가장 마지막에 말해진(최신) 단어를 가리키기 위해 뒤쪽 단어를 우선시함. 즉 계속 돌림.
+                        break
+                    
+                    # [시니어] 아직 시작 안 한 단어에 도달했다면 (0.05초 여유)
+                    if ws > curr_sec + 0.05:
+                        # 단어 사이 무음(Gap) 구간이면 직전 단어를 유지하여 깜빡임 방지
+                        if i > 0:
+                            target_idx, target_w_idx = idx, i - 1
+                        break
         
         new_active_id = f"{target_idx}_{target_w_idx}" if target_idx is not None else None
         
@@ -315,7 +324,7 @@ class UIBlockEditor:
                 rects = self.block_canvas.find_withtag(f"word_block&&{new_active_id}")
                 if rects:
                     self.active_word_bg = self.block_canvas.itemcget(rects[0], 'fill')
-                    self.block_canvas.itemconfig(rects[0], fill='#007AFF') # System Blue
+                    self.block_canvas.itemconfig(rects[0], fill='#80CFFF') # Lighter Blue (User Request)
 
     def _see_row(self, idx):
         """[사용자 요청] 현재 화면에 보이는 마지막 대사가 끝난 후에만 스크롤 (페이지 단위)"""
