@@ -21,11 +21,17 @@ from config_models import AnalysisSettings, TranscriptSegment, TranscriptWord
 from text_sanitizer import TextSanitizer
 from audio_processor import AudioProcessor
 from vision_processor import VisionProcessor
-import whisperx
-import whisperx.utils
-# [시니어] WhisperX 한국어 띄어쓰기 삭제 버그 우회 (Monkey Patch)
-if hasattr(whisperx.utils, "LANGUAGES_WITHOUT_SPACES") and "ko" in whisperx.utils.LANGUAGES_WITHOUT_SPACES:
-    whisperx.utils.LANGUAGES_WITHOUT_SPACES.remove("ko")
+# [시니어] WhisperX 정밀 정렬 (Optional Dependency)
+try:
+    import whisperx
+    import whisperx.utils
+    HAS_WHISPERX = True
+    # [시니어] WhisperX 한국어 띄어쓰기 삭제 버그 우회 (Monkey Patch)
+    if hasattr(whisperx.utils, "LANGUAGES_WITHOUT_SPACES") and "ko" in whisperx.utils.LANGUAGES_WITHOUT_SPACES:
+        whisperx.utils.LANGUAGES_WITHOUT_SPACES.remove("ko")
+except ImportError:
+    HAS_WHISPERX = False
+    print("[WARN] WhisperX module not found. Forced alignment feature is disabled.")
 
 class HyperTranscriptionEngine:
     def __init__(self):
@@ -106,6 +112,9 @@ class HyperTranscriptionEngine:
 
     def get_align_model(self, language_code="ko", device_mode="auto"):
         """WhisperX forced alignment 모델을 lazy load 및 캐싱"""
+        if not HAS_WHISPERX:
+            return None, None
+            
         best_device = self._detect_best_device(device_mode)
         
         # [시니어] 언어 코드가 불분명하면 ko로 강제 매핑
@@ -245,7 +254,7 @@ class HyperTranscriptionEngine:
                         segs_list = list(segs)
                         
                         # [WhisperX] WhisperX forced alignment로 단어 타임스탬프 보정
-                        if use_whisperx_align and use_word_timestamps and segs_list:
+                        if HAS_WHISPERX and use_whisperx_align and use_word_timestamps and segs_list:
                             try:
                                 best_dev = self._detect_best_device(device_mode)
                                 model_a, metadata = self.get_align_model(selected_lang, device_mode)

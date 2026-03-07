@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, font as tkfont
 import numpy as np
 import vlc
-from engine_core import HyperTranscriptionEngine
+from engine_core import HyperTranscriptionEngine, HAS_WHISPERX
 from video_editor import VideoEditor
 from video_player import VideoPlayer
 from config_models import AnalysisSettings
@@ -390,6 +390,12 @@ class CustomModelApp:
         self.use_silero_vad_var = tk.BooleanVar(value=True); tk.Checkbutton(c3, text='외부 VAD (Silero)', variable=self.use_silero_vad_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         self.use_whisper_vad_var = tk.BooleanVar(value=True); tk.Checkbutton(c3, text='내부 VAD (Whisper)', variable=self.use_whisper_vad_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         self.use_whisperx_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🎯 WhisperX 단어 싱크 보정', variable=self.use_whisperx_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
+        
+        def _check_whisperx(*_):
+            if self.use_whisperx_var.get() and not HAS_WHISPERX:
+                messagebox.showwarning("필수 모듈 미설치", "WhisperX 모듈이 설치되어 있지 않아 이 기능을 사용할 수 없습니다.\n\n설치 방법:\npip install git+https://github.com/m-bain/whisperX.git")
+                self.use_whisperx_var.set(False)
+        self.use_whisperx_var.trace_add('write', _check_whisperx)
         _sep(c3)
         
         r = _row(c3); tk.Label(r, text='무음 길이', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
