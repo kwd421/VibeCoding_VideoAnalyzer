@@ -361,15 +361,15 @@ class CustomModelApp:
         
         # ── 카드 2: 분석 모드 ──
         c2 = _card(insp_inner, '⚡  분석 모드')
-        self.mode_var = tk.StringVar(value='대사 변환 및 컷편집')
+        self.mode_var = tk.StringVar(value='자연어-대사 변환')
         self.mode_combo = ttk.Combobox(c2, textvariable=self.mode_var, values=['자연어-대사 변환', '대사 변환 및 컷편집', '깜놀 구간 탐색', '무음 제거 편집 (VAD)', '자동 챕터 분할 (CLIP)'], state='readonly')
         self.mode_combo.pack(fill=tk.X, pady=(0,6))
         
         def _check_mode(*_):
             m = self.mode_var.get()
-            if m in ['자연어-대사 변환', '자동 챕터 분할 (CLIP)']:
+            if m in ['대사 변환 및 컷편집', '자동 챕터 분할 (CLIP)']:
                 messagebox.showinfo("알림", "아직 준비 중인 기능입니다!")
-                self.mode_var.set('대사 변환 및 컷편집')
+                self.mode_var.set('자연어-대사 변환') # 사용 가능한 모드로 자동 전환
             self.reset_action_button()
         self.mode_var.trace_add('write', _check_mode)
         self.btn_analyze = tk.Button(c2, text='  분석 시작  ', command=self.on_start_analysis, bg=C['accent'], fg='white', font=('Noto Sans KR', 13, 'bold'), relief='flat', bd=0, compound='center', pady=10, cursor='hand2'); self.btn_analyze.pack(fill=tk.X, pady=(0,4)); _hover(self.btn_analyze, C['accent'], '#0062CC')

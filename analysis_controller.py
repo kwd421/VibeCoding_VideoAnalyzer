@@ -84,7 +84,7 @@ class AnalysisController:
                         self.transcript_manager.add_segment(r, dispatch_ui)
                 
                 if not stop_ev.is_set(): 
-                    is_combi = "컷편집" in mode
+                    is_combi = "컷편집" in mode or "자연어" in mode
                     total_elapsed = int(time.time() - start_time)
                     complete_txt = f"분석 완료 ({total_elapsed//60}분 {total_elapsed%60}초)"
                     self.dispatcher.emit("complete", {"text": complete_txt, "is_vad": is_combi, "is_whisper": True})
