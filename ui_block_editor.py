@@ -323,8 +323,10 @@ class UIBlockEditor:
             if new_active_id:
                 rects = self.block_canvas.find_withtag(f"word_block&&{new_active_id}")
                 if rects:
-                    self.active_word_bg = self.block_canvas.itemcget(rects[0], 'fill')
-                    self.block_canvas.itemconfig(rects[0], fill='#80CFFF') # Lighter Blue (User Request)
+                    try:
+                        self.active_word_bg = self.block_canvas.itemcget(rects[0], 'fill')
+                        self.block_canvas.itemconfig(rects[0], fill='#80CFFF') # Lighter Blue (User Request)
+                    except: pass
 
     def _see_row(self, idx):
         """[사용자 요청] 현재 화면에 보이는 마지막 대사가 끝난 후에만 스크롤 (페이지 단위)"""
@@ -528,6 +530,8 @@ class UIBlockEditor:
         if not hasattr(self, 'block_canvas') or not self.block_canvas.winfo_exists(): return
         self.block_canvas.delete("all")
         self.row_y_map = []
+        self.active_word_id = None
+        self.active_word_bg = None
         results_data = self.transcript_manager.get_all()
         BC = self.BC
         
@@ -598,7 +602,10 @@ class UIBlockEditor:
                     dur = (e_t - s_t) / max(1, len(split_t))
                     words = [{'word': wt, 's': s_t + i*dur, 'e': s_t + (i+1)*dur} for i, wt in enumerate(split_t)]
             
-            results_data[idx]['words'] = words
+            # [시니어 최적화] 렌더링 시 데이터 구조가 바뀌면 Ctrl+Z에 영향을 줄 수 있으므로, 
+            # 단어 블록이 이미 충분히 세분화되어 있다면 덮어쓰지 않음
+            if not r.get('words') or len(r.get('words')) < len(words):
+                results_data[idx]['words'] = words
 
             # [사용자 요청] 배경색 불투명도 70% 시뮬레이션 (Color Blending)
             # 행 배경색에 따라 노란색(#ffca1a)을 70% 혼합하여 투명 느낌 구현

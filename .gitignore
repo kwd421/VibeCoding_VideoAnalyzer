@@ -19,3 +19,8 @@ refactored_temp.wav
 *.safetensors
 *.onnx
 models/
+
+# PyInstaller
+build/
+dist/
+*.spec

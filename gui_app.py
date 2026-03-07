@@ -904,7 +904,8 @@ class CustomModelApp:
                     break
 
         if not fast:
-            if getattr(self, "notebook", None) and self.notebook.index(self.notebook.select()) == 1:
+            # [사용자 요청] 단어 블록 탭(0번)일 때만 마법진 캔버스 리프레시 수행 (성능 절약)
+            if getattr(self, "notebook", None) and self.notebook.index(self.notebook.select()) == 0:
                 self.block_editor.render_block_view()
         
         self.apply_preview_subtitles(force_reload=True)

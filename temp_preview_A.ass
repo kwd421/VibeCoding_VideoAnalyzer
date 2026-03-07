@@ -12,7 +12,8 @@ Style: Default,맑은 고딕,80,&H00FFFFFF&,&H000000FF&,&H00000000&,&H00000000&,
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-Dialogue: 0,0:00:00.22,0:00:02.64,Default,,0,0,0,,가끔 보면 그런 분들이 계시거든요?
+Dialogue: 0,0:00:00.22,0:00:01.91,Default,,0,0,0,,가끔 보면 그런 분들이
+Dialogue: 0,0:00:01.96,0:00:02.64,Default,,0,0,0,,계시거든요?
 Dialogue: 0,0:00:02.76,0:00:03.89,Default,,0,0,0,,회사에서도 그렇고
 Dialogue: 0,0:00:03.94,0:00:05.74,Default,,0,0,0,,제가 좀 키도 있고
 Dialogue: 0,0:00:06.32,0:00:07.87,Default,,0,0,0,,머리카락도 길고
