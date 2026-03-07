@@ -738,8 +738,8 @@ class UIBlockEditor:
             if is_valid:
                 if target['type'] == 'merge':
                     rmap = next(r for r in self.row_y_map if r['idx'] == target['idx'])
-                    # [사용자 요청 4] 푸른색 시각화
-                    self.block_canvas.create_rectangle(8, rmap['y_start'], 3000, rmap['y_end'], fill="", outline='#5AC8FA', width=2, dash=(4,4), tags="drop_highlight")
+                    # [사용자 요청] 더 진하고 두꺼운 시각화 (#0A84FF, width=4)
+                    self.block_canvas.create_rectangle(8, rmap['y_start'], 3000, rmap['y_end'], fill="", outline='#0A84FF', width=4, dash=(3,2), tags="drop_highlight")
                 elif target['type'] == 'insert':
                     insert_idx = target['idx']
                     if insert_idx < len(self.row_y_map):
@@ -748,8 +748,8 @@ class UIBlockEditor:
                     else:
                         rmap = self.row_y_map[-1]
                         y_pos = rmap['y_end'] + 2
-                    # [사용자 요청 4] 푸른색 시각화
-                    self.block_canvas.create_line(8, y_pos, 3000, y_pos, fill='#5AC8FA', width=2, dash=(4,4), tags="drop_highlight")
+                    # [사용자 요청] 더 진하고 두꺼운 시각화 (#0A84FF, width=4)
+                    self.block_canvas.create_line(8, y_pos, 3000, y_pos, fill='#0A84FF', width=4, dash=(3,2), tags="drop_highlight")
                 
                 self.block_canvas.tag_raise("drop_highlight")
                 for it in self.drag_data["items"]:

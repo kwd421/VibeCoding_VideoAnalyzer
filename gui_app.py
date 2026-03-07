@@ -219,7 +219,7 @@ class CustomModelApp:
         self.btn_analyze.config(state=tk.NORMAL)
         if task.get("is_vad"): 
             self.save_frame.pack(fill=tk.X, pady=5, before=self.lbl_status)
-            for b in [self.btn_fast_save, self.btn_pro_save, self.btn_xml_save]: b.config(state=tk.NORMAL)
+            for b in [self.btn_fast_save, self.btn_pro_save]: b.config(state=tk.NORMAL)
         
         if task.get("is_whisper"): self.apply_preview_subtitles()
         self.btn_stop.config(state=tk.DISABLED)
@@ -361,9 +361,17 @@ class CustomModelApp:
         
         # ── 카드 2: 분석 모드 ──
         c2 = _card(insp_inner, '⚡  분석 모드')
-        self.mode_var = tk.StringVar(value='대사 변환 및 컷편집 (종합)')
+        self.mode_var = tk.StringVar(value='대사 변환 및 컷편집')
         self.mode_combo = ttk.Combobox(c2, textvariable=self.mode_var, values=['자연어-대사 변환', '대사 변환 및 컷편집', '깜놀 구간 탐색', '무음 제거 편집 (VAD)', '자동 챕터 분할 (CLIP)'], state='readonly')
-        self.mode_combo.pack(fill=tk.X, pady=(0,6)); self.mode_var.trace_add('write', lambda *_: self.reset_action_button())
+        self.mode_combo.pack(fill=tk.X, pady=(0,6))
+        
+        def _check_mode(*_):
+            m = self.mode_var.get()
+            if m in ['자연어-대사 변환', '자동 챕터 분할 (CLIP)']:
+                messagebox.showinfo("알림", "아직 준비 중인 기능입니다!")
+                self.mode_var.set('대사 변환 및 컷편집')
+            self.reset_action_button()
+        self.mode_var.trace_add('write', _check_mode)
         self.btn_analyze = tk.Button(c2, text='  분석 시작  ', command=self.on_start_analysis, bg=C['accent'], fg='white', font=('Noto Sans KR', 13, 'bold'), relief='flat', bd=0, compound='center', pady=10, cursor='hand2'); self.btn_analyze.pack(fill=tk.X, pady=(0,4)); _hover(self.btn_analyze, C['accent'], '#0062CC')
         self.btn_stop = tk.Button(c2, text='  작업 중지  ', command=self.on_stop_action, bg=C['bg3'], fg=C['red'], font=_fb, relief='flat', bd=0, compound='center', state=tk.DISABLED, pady=5, cursor='hand2'); self.btn_stop.pack(fill=tk.X); _hover(self.btn_stop, C['bg3'], C['border'])
         self.lbl_status = LblMarquee(c2, text='준비됨', fg=C['green'], bg=C['bg2'], font=_f); self.lbl_status.pack(fill=tk.X, pady=(6,0))
@@ -372,9 +380,8 @@ class CustomModelApp:
         self.save_frame = tk.Frame(c2, bg=C['bg2']); self.save_frame.pack(fill=tk.X, pady=4); self.save_frame.pack_forget()
         tk.Checkbutton(self.save_frame, text='🔥 영상에 자막 입히기 (Re-encode)', variable=self.use_burn_sub_var, bg=C['bg2'], selectcolor=C['bg3'], activebackground=C['bg2'], font=_f, relief=tk.FLAT, bd=0).pack(anchor=tk.W, pady=(0, 4))
         btn_box = tk.Frame(self.save_frame, bg=C['bg2']); btn_box.pack(fill=tk.X)
-        self.btn_fast_save = tk.Button(btn_box, text='  🚀 초고속  ', command=lambda: self.start_export(fast=True), bg=C['purple'], fg='white', font=_f, relief='flat', bd=0, compound='center', pady=6, cursor='hand2'); self.btn_fast_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0,2)); _hover(self.btn_fast_save, C['purple'], '#9342B5')
-        self.btn_pro_save = tk.Button(btn_box, text='  🎯 정밀  ', command=lambda: self.start_export(fast=False), bg=C['bg3'], fg=C['text'], font=_f, relief='flat', bd=0, compound='center', pady=6, cursor='hand2'); self.btn_pro_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2); _hover(self.btn_pro_save, C['bg3'], C['border'])
-        self.btn_xml_save = tk.Button(btn_box, text='  🎬 XML  ', command=self.on_export_xml, bg=C['bg3'], fg=C['text'], font=_f, relief='flat', bd=0, compound='center', pady=6, cursor='hand2'); self.btn_xml_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2,0)); _hover(self.btn_xml_save, C['bg3'], C['border'])
+        self.btn_fast_save = tk.Button(btn_box, text='  🚀 초고속 렌더링  ', command=lambda: self.start_export(fast=True), bg=C['purple'], fg='white', font=_f, relief='flat', bd=0, compound='center', pady=6, cursor='hand2'); self.btn_fast_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0,2)); _hover(self.btn_fast_save, C['purple'], '#9342B5')
+        self.btn_pro_save = tk.Button(btn_box, text='  🎯 정밀 렌더링  ', command=lambda: self.start_export(fast=False), bg=C['bg3'], fg=C['text'], font=_f, relief='flat', bd=0, compound='center', pady=6, cursor='hand2'); self.btn_pro_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2,0)); _hover(self.btn_pro_save, C['bg3'], C['border'])
         
         # ── 카드 3: 세부 튜닝 (다시 밖으로 이동) ──
         c3 = _card(insp_inner, '🎛  세부 튜닝')
@@ -392,8 +399,8 @@ class CustomModelApp:
         self.use_whisperx_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🎯 WhisperX 단어 싱크 보정', variable=self.use_whisperx_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         
         def _check_whisperx(*_):
-            if self.use_whisperx_var.get() and not HAS_WHISPERX:
-                messagebox.showwarning("필수 모듈 미설치", "WhisperX 모듈이 설치되어 있지 않아 이 기능을 사용할 수 없습니다.\n\n설치 방법:\npip install git+https://github.com/m-bain/whisperX.git")
+            if self.use_whisperx_var.get():
+                messagebox.showinfo("알림", "아직 지원하지 않는 기능입니다!")
                 self.use_whisperx_var.set(False)
         self.use_whisperx_var.trace_add('write', _check_whisperx)
         _sep(c3)
@@ -493,7 +500,7 @@ class CustomModelApp:
         # ── 카드 4: 내보내기 ──
         c4 = _card(insp_inner, '📤  내보내기')
         r = _row(c4); tk.Label(r, text='포맷', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
-        self.export_format = tk.StringVar(value='SRT'); ttk.Combobox(r, textvariable=self.export_format, values=['SRT', 'VTT', 'TXT', 'CSV'], state='readonly', width=8).pack(side=tk.RIGHT)
+        self.export_format = tk.StringVar(value='SRT'); ttk.Combobox(r, textvariable=self.export_format, values=['SRT', 'VTT', 'TXT', 'CSV', 'FCPXML'], state='readonly', width=8).pack(side=tk.RIGHT)
         bx = tk.Button(c4, text='  📄 자막 내보내기  ', command=self.export_subtitles, bg=C['orange'], fg='white', font=_fb, relief='flat', bd=0, compound='center', pady=8, cursor='hand2'); bx.pack(fill=tk.X, pady=(8,0)); _hover(bx, C['orange'], '#E08600')
         
         # [Apple HIG] 컨텍스트 메뉴 및 이벤트 바인딩
@@ -678,7 +685,7 @@ class CustomModelApp:
 
     def load_engine_async(self): threading.Thread(target=self.controller.init_engine, daemon=True).start()
 
-    def reset_action_button(self): self.save_frame.pack_forget(); self.btn_analyze.config(text="  분석 시작  ", command=self.on_start_analysis, bg=self.C['accent'], state=tk.NORMAL); self.btn_fast_save.config(state=tk.NORMAL); self.btn_pro_save.config(state=tk.NORMAL); self.btn_xml_save.config(state=tk.NORMAL)
+    def reset_action_button(self): self.save_frame.pack_forget(); self.btn_analyze.config(text="  분석 시작  ", command=self.on_start_analysis, bg=self.C['accent'], state=tk.NORMAL); self.btn_fast_save.config(state=tk.NORMAL); self.btn_pro_save.config(state=tk.NORMAL)
     def apply_vlc_sub_settings(self):
         """[ASS 핫스왓] 디자인 변경 시 ASS 파일만 재생성하여 VLC에 즉시 로드"""
         self.apply_preview_subtitles(force_reload=False)
@@ -767,7 +774,7 @@ class CustomModelApp:
         media_info = self.video_editor.get_media_info(self.current_video_path); ext = os.path.splitext(self.current_video_path)[1].lower().strip('.')
         save_path = filedialog.asksaveasfilename(defaultextension=f".{ext if ext in ['mp4','mkv','mov','avi'] else 'mp4'}", filetypes=[("Video File", f"*.{ext}")], initialfile=f"cut_{os.path.basename(self.current_video_path)}")
         if save_path:
-            for b in [self.btn_fast_save, self.btn_pro_save, self.btn_xml_save]: b.config(state=tk.DISABLED)
+            for b in [self.btn_fast_save, self.btn_pro_save]: b.config(state=tk.DISABLED)
             self.btn_stop.config(state=tk.NORMAL); self.progress_var.set(0)
             
             # [시니어] 자막 합치기(Burn) 옵션 처리
@@ -1227,7 +1234,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     def export_subtitles(self):
         if not self.results_data: return
-        fmt = self.export_format.get(); ext = "." + fmt.lower(); initial = os.path.splitext(os.path.basename(self.current_video_path))[0]; file_path = filedialog.asksaveasfilename(defaultextension=ext, initialfile=initial, filetypes=[(fmt, "*" + ext)])
+        fmt = self.export_format.get()
+        if fmt == "FCPXML":
+            self.on_export_xml()
+            return
+            
+        ext = "." + fmt.lower()
+        initial = os.path.splitext(os.path.basename(self.current_video_path))[0]
+        file_path = filedialog.asksaveasfilename(defaultextension=ext, initialfile=initial, filetypes=[(fmt, "*" + ext)])
         if file_path:
             with open(file_path, "w", encoding="utf-8") as f:
                 if fmt == "SRT":
@@ -1237,4 +1251,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         s = time.strftime('%H:%M:%S', time.gmtime(s_r)) + f",{int((s_r%1)*1000):03d}"; e = time.strftime('%H:%M:%S', time.gmtime(e_r)) + f",{int((e_r%1)*1000):03d}"; f.write(f"{i+1}\n{s} --> {e}\n{r['t']}\n\n")
                 elif fmt == "TXT":
                     for r in self.results_data: f.write(f"[{round(r['s'], 2)}s] {r['t']}\n")
+                elif fmt == "VTT":
+                    f.write("WEBVTT\n\n")
+                    for i, r in enumerate(self.results_data):
+                        s_r, e_r = r['s'], r['e']
+                        if i < len(self.results_data) - 1 and e_r >= self.results_data[i+1]['s']: e_r = max(s_r + 0.1, self.results_data[i+1]['s'] - 0.05)
+                        s = time.strftime('%H:%M:%S', time.gmtime(s_r)) + f".{int((s_r%1)*1000):03d}"; e = time.strftime('%H:%M:%S', time.gmtime(e_r)) + f".{int((e_r%1)*1000):03d}"; f.write(f"{i+1}\n{s} --> {e}\n{r['t']}\n\n")
+                elif fmt == "CSV":
+                    import csv
+                    writer = csv.writer(f)
+                    writer.writerow(["Index", "Start", "End", "Text"])
+                    for i, r in enumerate(self.results_data):
+                        writer.writerow([i+1, r['s'], r['e'], r['t']])
             messagebox.showinfo("완료", "저장되었습니다.")
