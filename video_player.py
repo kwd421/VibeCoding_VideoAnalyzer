@@ -49,7 +49,7 @@ class VideoPlayer:
                     
                 self.player.play()
                 timeout = time.time() + 2.0
-                while not self.player.is_playing() and time.time() < self._async_timeout:
+                while not self.player.is_playing() and time.time() < timeout:
                     time.sleep(0.05)
                 
                 # 영상이 제대로 로드된 후 지정된 상태로 복구

@@ -294,10 +294,14 @@ class HyperTranscriptionEngine:
                                                     self.end = e
                                             self.words = [_W(w['word'], w['start'], w['end']) for w in new_words]
 
+                                    aligned_segments = aligned_result.get("segments", [])
+                                    if len(aligned_segments) != len(segs_list):
+                                        print(f"[WARN] WhisperX segment count mismatch: aligned={len(aligned_segments)}, original={len(segs_list)}. Falling back safely.")
+
                                     new_segs = []
-                                    for i, seg_dict in enumerate(aligned_result["segments"]):
-                                        # [시니어] 글자(Character) 단위 정밀 조립 및 원본 매핑
-                                        orig_seg = segs_list[i]
+                                    for i, seg_dict in enumerate(aligned_segments):
+                                        # Preserve timing even when WhisperX returns fewer or more segments.
+                                        orig_seg = segs_list[i] if i < len(segs_list) else None
                                         orig_words = getattr(orig_seg, 'words', []) or []
                                         raw_words = seg_dict.get("words", [])
                                         
@@ -333,8 +337,12 @@ class HyperTranscriptionEngine:
                                             last_processed_e = w_end
                                         
                                         new_segs.append(_CTCAlignedSeg(seg_dict, new_words_data))
-                                    
-                                    segs_list = new_segs
+
+                                    if len(aligned_segments) < len(segs_list):
+                                        new_segs.extend(segs_list[len(aligned_segments):])
+
+                                    if new_segs:
+                                        segs_list = new_segs
                                     
                             except Exception as e:
                                 print(f"[WARN] WhisperX alignment 전체 실패, 기존 결과 유지: {e}")

@@ -93,8 +93,19 @@ class CustomModelApp:
     def results_data(self, val):
         if val == []:
             self.transcript_manager.clear()
-    def __init__(self, root):
+
+    def _report_startup_progress(self, percent, message):
+        cb = getattr(self, '_startup_progress_cb', None)
+        if cb is None:
+            return
+        try:
+            cb(percent, message)
+        except Exception:
+            pass
+    def __init__(self, root, startup_progress=None):
         self.root = root
+        self._startup_progress_cb = startup_progress
+        self._report_startup_progress(10, "Applying theme...")
         self.root.title("VAD AI Studio v26")
         self.root.geometry("1300x850")
         self.root.configure(bg='#F2F2F7')
@@ -149,11 +160,13 @@ class CustomModelApp:
         style.configure('Horizontal.TProgressbar', troughcolor=C['bg3'], background=C['accent'],
                          borderwidth=0, thickness=4)
         style.configure('TScrollbar', background=C['bg3'], troughcolor=C['bg2'], borderwidth=0, arrowcolor=C['text2'])
+        self._report_startup_progress(30, "Preparing engines...")
         
         self.engine = HyperTranscriptionEngine()
         self.video_editor = VideoEditor()
         self.player = None
         self.stop_event = threading.Event()
+        self._is_closing = False
         self.transcript_manager = TranscriptManager()
         self.current_video_path = None
         self.is_seeking = False
@@ -162,44 +175,79 @@ class CustomModelApp:
         # [시니어] 앱의 실행 경로 정밀 추적 (System32 등 엉뚱한 CWD 방어)
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
         self.controller = AnalysisController(self.engine, self.video_editor, self.transcript_manager, self.dispatcher)
+        self._report_startup_progress(50, "Building interface...")
         self.setup_ui()
+        self._report_startup_progress(75, "Connecting player...")
         self.player = VideoPlayer(self.video_canvas.winfo_id())
         self.bind_keys()
         self.bind_events()
+        self._report_startup_progress(90, "Finalizing startup...")
         self.load_engine_async()
         self.update_loop()
         
         # [시니어] 프로그램 종료 시 찌꺼기 파일 청소 프로토콜 등록
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self._report_startup_progress(100, "Ready")
 
     def on_closing(self):
-        """프로그램 종료 전 찌꺼기 파일 및 스레드 정리"""
+        """Clean up temp files and stop background work before exit."""
+        self._is_closing = True
+        self.stop_event.set()
         try:
             import glob
             import shutil
-            # 1. 임시 ASS 자막 파일 삭제
+            # 1. Remove temporary ASS subtitle files.
             for f in glob.glob(os.path.join(self.base_dir, "export_burn_*.ass")):
-                try: os.remove(f)
-                except: pass
-            
-            # 2. 임시 폴더(Fast Mode 등) 삭제
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
+
+            # 2. Remove temporary working folders.
             for d in glob.glob(os.path.join(self.base_dir, "temp_fast_*")):
-                try: shutil.rmtree(d, ignore_errors=True)
-                except: pass
-                
-            # 3. 스레드 중지 신호 및 종료
-            self.stop_event.set()
-        except: pass
+                try:
+                    shutil.rmtree(d, ignore_errors=True)
+                except OSError:
+                    pass
+
+            if self.player:
+                self.player.stop()
+        except Exception:
+            pass
         finally:
-            self.root.destroy()
+            try:
+                if self.root.winfo_exists():
+                    self.root.destroy()
+            except tk.TclError:
+                pass
+
+    def _queue_ui(self, callback):
+        if self._is_closing:
+            return
+        try:
+            if not self.root.winfo_exists():
+                return
+            self.root.after(0, lambda: self._run_ui_callback(callback))
+        except tk.TclError:
+            pass
+
+    def _run_ui_callback(self, callback):
+        if self._is_closing:
+            return
+        try:
+            if not self.root.winfo_exists():
+                return
+            callback()
+        except tk.TclError:
+            pass
 
     def bind_events(self):
-        self.dispatcher.on("progress", lambda x: self.root.after(0, lambda: self._on_progress(x)))
-        self.dispatcher.on("add_row", lambda x: self.root.after(0, lambda: self._on_add_row(x)))
-        self.dispatcher.on("complete", lambda x: self.root.after(0, lambda: self._on_complete(x)))
-        self.dispatcher.on("message", lambda x: self.root.after(0, lambda: messagebox.showinfo("완료", x["text"])))
-        self.dispatcher.on("error", lambda x: self.root.after(0, lambda: messagebox.showerror("오류", x["text"])))
-        self.dispatcher.on("ghost_defense", lambda x: self.root.after(0, lambda: [self.reset_action_button(), self.btn_stop.config(state=tk.DISABLED)]))
+        self.dispatcher.on("progress", lambda x: self._queue_ui(lambda: self._on_progress(x)))
+        self.dispatcher.on("add_row", lambda x: self._queue_ui(lambda: self._on_add_row(x)))
+        self.dispatcher.on("complete", lambda x: self._queue_ui(lambda: self._on_complete(x)))
+        self.dispatcher.on("message", lambda x: self._queue_ui(lambda: messagebox.showinfo("Done", x["text"])))
+        self.dispatcher.on("error", lambda x: self._queue_ui(lambda: messagebox.showerror("Error", x["text"])))
+        self.dispatcher.on("ghost_defense", lambda x: self._queue_ui(lambda: [self.reset_action_button(), self.btn_stop.config(state=tk.DISABLED)]))
 
     def _on_progress(self, task):
         self.progress_var.set(task["value"]); self.lbl_status.config(text=task["text"])
@@ -686,6 +734,20 @@ class CustomModelApp:
     def load_engine_async(self): threading.Thread(target=self.controller.init_engine, daemon=True).start()
 
     def reset_action_button(self): self.save_frame.pack_forget(); self.btn_analyze.config(text="  분석 시작  ", command=self.on_start_analysis, bg=self.C['accent'], state=tk.NORMAL); self.btn_fast_save.config(state=tk.NORMAL); self.btn_pro_save.config(state=tk.NORMAL)
+    def reset_for_new_video(self):
+        """Clear previous analysis state when selecting a new video."""
+        self.stop_event.set()
+        self.stop_event = threading.Event()
+        self.results_data = []
+        self.tree.delete(*self.tree.get_children())
+        self.progress_var.set(0)
+        self.seek_var.set(0)
+        self.lbl_time.config(text='00:00 / 00:00')
+        self.btn_stop.config(state=tk.DISABLED)
+        self._last_active_idx = -2
+        if hasattr(self, 'block_editor'):
+            self.block_editor.render_block_view()
+
     def apply_vlc_sub_settings(self):
         """[ASS 핫스왓] 디자인 변경 시 ASS 파일만 재생성하여 VLC에 즉시 로드"""
         self.apply_preview_subtitles(force_reload=False)
@@ -700,6 +762,7 @@ class CustomModelApp:
                 self.preview_srt_path = None
                 
             if self.player.load_video(p):
+                self.reset_for_new_video()
                 def _resize():
                     w, h = self.player.get_video_resolution()
                     if w > 0 and h > 0:
