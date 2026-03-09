@@ -173,7 +173,7 @@ class CustomModelApp:
         self.ICON_PLAY = chr(9654); self.ICON_PAUSE = chr(9208)
         self.dispatcher = EventEmitter()
         # [시니어] 앱의 실행 경로 정밀 추적 (System32 등 엉뚱한 CWD 방어)
-        self.base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.base_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
         self.controller = AnalysisController(self.engine, self.video_editor, self.transcript_manager, self.dispatcher)
         self._report_startup_progress(50, "Building interface...")
         self.setup_ui()
@@ -399,7 +399,7 @@ class CustomModelApp:
         bf = tk.Button(c1, text='  📂  영상 파일 선택  ', command=self.on_select_video, bg=C['bg3'], fg=C['text'], font=_f, relief='flat', bd=0, compound='center', pady=8, cursor='hand2'); bf.pack(fill=tk.X, pady=(0,6)); _hover(bf, C['bg3'], C['border'])
         r = _row(c1); tk.Label(r, text='AI 모델', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
         self.ai_model_var = tk.StringVar(value='large-v3-turbo (기본)')
-        self.ai_model_combo = ttk.Combobox(r, textvariable=self.ai_model_var, values=['large-v3-turbo (기본)', 'models/whisper-medium-ko-zeroth (Medium-Zeroth)'], state='readonly', width=24); self.ai_model_combo.pack(side=tk.RIGHT)
+        self.ai_model_combo = ttk.Combobox(r, textvariable=self.ai_model_var, values=['large-v3-turbo (기본)', 'models/Whisper-Large-v3-turbo-STT-Zeroth-KO-v2 (Local Zeroth)', 'models/whisper-medium-ko-zeroth (Medium-Zeroth)'], state='readonly', width=36); self.ai_model_combo.pack(side=tk.RIGHT)
         self.ai_model_var.trace_add('write', lambda *_: self.reset_action_button())
         _sep(c1)
         r = _row(c1); tk.Label(r, text='가속 장치', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
@@ -442,8 +442,8 @@ class CustomModelApp:
         chk_cfg = dict(bg=C['bg2'], selectcolor=C['bg3'], activebackground=C['bg2'], font=_f, relief=tk.FLAT, bd=0)
         self.remove_punctuation_var = tk.BooleanVar(value=True); tk.Checkbutton(c3, text='✂️문장부호 제거', variable=self.remove_punctuation_var, fg=C['text2'], **chk_cfg).pack(anchor=tk.W, pady=1)
         _sep(c3)
-        self.use_silero_vad_var = tk.BooleanVar(value=True); tk.Checkbutton(c3, text='외부 VAD (Silero)', variable=self.use_silero_vad_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
-        self.use_whisper_vad_var = tk.BooleanVar(value=True); tk.Checkbutton(c3, text='내부 VAD (Whisper)', variable=self.use_whisper_vad_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
+        self.use_silero_vad_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='외부 VAD (Silero)', variable=self.use_silero_vad_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
+        self.use_whisper_vad_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='내부 VAD (Whisper)', variable=self.use_whisper_vad_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         self.use_whisperx_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🎯 WhisperX 단어 싱크 보정', variable=self.use_whisperx_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         
         def _check_whisperx(*_):

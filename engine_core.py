@@ -1,4 +1,5 @@
 import os
+import sys
 import subprocess
 import wave
 import numpy as np
@@ -35,6 +36,7 @@ except ImportError:
 
 class HyperTranscriptionEngine:
     def __init__(self):
+        self.base_dir = self._get_base_dir()
         self.model_id = "large-v3-turbo"
         self.ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
         self.fw_model = None
@@ -48,6 +50,40 @@ class HyperTranscriptionEngine:
         self.device_info = "auto"
         self.align_models_cache = {}    # [캐싱] 언어별 WhisperX 정렬 모델
         
+    def _get_base_dir(self):
+        if getattr(sys, "frozen", False):
+            return os.path.dirname(sys.executable)
+        return os.path.dirname(os.path.abspath(__file__))
+
+    def _resolve_model_id(self, model_id):
+        if not model_id:
+            return model_id
+
+        normalized = model_id.replace("/", os.sep)
+        candidate_paths = []
+        if not os.path.isabs(normalized):
+            candidate_paths.append(os.path.join(self.base_dir, normalized))
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                candidate_paths.append(os.path.join(meipass, normalized))
+        else:
+            candidate_paths.append(normalized)
+
+        if model_id == "large-v3-turbo":
+            for root_dir in (self.base_dir, getattr(sys, "_MEIPASS", None)):
+                if not root_dir:
+                    continue
+                bundled_path = os.path.join(root_dir, "models", "faster-whisper-large-v3-turbo")
+                if os.path.isdir(bundled_path):
+                    print(f"[INFO] Using bundled large-v3-turbo model: {bundled_path}")
+                    return bundled_path
+
+        for candidate in candidate_paths:
+            if os.path.isdir(candidate):
+                return candidate
+
+        return model_id
+
     def _detect_best_device(self, user_choice="auto"):
         """[시니어 하드웨어 분석] 환경에 맞는 텐서 연산 장치 동적 스캔"""
         if user_choice.startswith("cpu"):
@@ -82,7 +118,8 @@ class HyperTranscriptionEngine:
             workers = 2 if ct2_dev == "cpu" else 1
             threads_per_worker = max(1, target_threads // workers)
             
-            self.fw_model = WhisperModel(self.model_id, device=ct2_dev, compute_type=c_type, cpu_threads=threads_per_worker, num_workers=workers)
+            model_source = self._resolve_model_id(self.model_id)
+            self.fw_model = WhisperModel(model_source, device=ct2_dev, compute_type=c_type, cpu_threads=threads_per_worker, num_workers=workers)
         return self.fw_model
 
     def set_model_id(self, new_model_id):
@@ -185,6 +222,7 @@ class HyperTranscriptionEngine:
         use_word_timestamps = options.use_word_timestamps
         use_whisper_vad = options.use_whisper_vad
         use_silero_vad = options.use_silero_vad
+        runtime_whisper_vad = {"enabled": use_whisper_vad}
         use_whisperx_align = options.use_whisperx_align
 
         # 소음 제거 적용
@@ -235,8 +273,8 @@ class HyperTranscriptionEngine:
                         transcribe_kwargs = dict(
                             beam_size=beam_size,
                             language=selected_lang,
-                            vad_filter=use_whisper_vad,
-                            vad_parameters=dict(min_silence_duration_ms=500, threshold=0.5) if use_whisper_vad else None,
+                            vad_filter=runtime_whisper_vad["enabled"],
+                            vad_parameters=dict(min_silence_duration_ms=500, threshold=0.5) if runtime_whisper_vad["enabled"] else None,
                             condition_on_previous_text=False,
                             # [발음 정확도] temperature=0.0 단일값 대신 fallback 리스트 사용
                             # 첫 시도(0.0)에서 확신도 낮으면 0.2→0.4 순서로 자동 재시도 (Whisper 공식 방식)
@@ -250,7 +288,18 @@ class HyperTranscriptionEngine:
                             word_timestamps=use_word_timestamps
                         )
                             
-                        segs, _ = model.transcribe(sub_chunk, **transcribe_kwargs)
+                        try:
+                            segs, _ = model.transcribe(sub_chunk, **transcribe_kwargs)
+                        except Exception as e:
+                            err_text = str(e).lower()
+                            if runtime_whisper_vad["enabled"] and any(token in err_text for token in ["onnx", "vad", "ort"]):
+                                runtime_whisper_vad["enabled"] = False
+                                print(f"[WARN] Whisper VAD failed, retrying without internal VAD: {e}")
+                                transcribe_kwargs["vad_filter"] = False
+                                transcribe_kwargs["vad_parameters"] = None
+                                segs, _ = model.transcribe(sub_chunk, **transcribe_kwargs)
+                            else:
+                                raise
                         segs_list = list(segs)
                         
                         # [WhisperX] WhisperX forced alignment로 단어 타임스탬프 보정

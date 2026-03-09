@@ -21,6 +21,10 @@
 - New video selection now clears previous transcript/block state in `gui_app.py`.
 - `video_player.py` uses a local timeout inside async load wait logic.
 - Temp file cleanup is scoped to the script directory instead of the process CWD.
+- Frozen builds now resolve runtime paths from the executable directory.
+- Bundled Faster-Whisper models are preferred over remote download when available.
+- A repeatable release script is available in `build_release.bat` and uses `--clean`.
+- Deployment notes are documented in `DEPLOYMENT.md`.
 
 ## Recent Sync Experiments
 - We attempted word-level sync improvements in `engine_core.py`, `gui_app.py`, and `ui_block_editor.py`.

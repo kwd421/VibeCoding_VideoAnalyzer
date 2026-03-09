@@ -13,8 +13,8 @@ class AnalysisSettings:
     min_silence_ms: int = 2000
     speech_pad_ms: int = 250
     use_word_timestamps: bool = True
-    use_whisper_vad: bool = True
-    use_silero_vad: bool = True
+    use_whisper_vad: bool = False
+    use_silero_vad: bool = False
     use_whisperx_align: bool = False  # WhisperX forced alignment 사용 여부
     remove_punctuation: bool = False
 

@@ -1,10 +1,11 @@
 import tkinter as tk
 from tkinter import ttk
 import os
+import sys
 import glob
 import traceback
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
 
 
 def create_startup_splash(root):
