@@ -403,7 +403,7 @@ class CustomModelApp:
         self.ai_model_var.trace_add('write', lambda *_: self.reset_action_button())
         _sep(c1)
         r = _row(c1); tk.Label(r, text='가속 장치', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
-        self.device_var = tk.StringVar(value='자동 감지 (auto)'); ttk.Combobox(r, textvariable=self.device_var, values=['자동 감지 (auto)', 'NVIDIA (cuda)', 'Apple Mac (mps)', 'CPU (25%)', 'CPU (50%)', 'CPU (75%)'], state='readonly', width=14).pack(side=tk.RIGHT)
+        self.device_var = tk.StringVar(value='CPU (50%)'); ttk.Combobox(r, textvariable=self.device_var, values=['?? ?? (auto)', 'NVIDIA (cuda)', 'Apple Mac (mps)', 'CPU (25%)', 'CPU (50%)', 'CPU (75%)'], state='readonly', width=14).pack(side=tk.RIGHT)
         r = _row(c1); tk.Label(r, text='언어', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
         self.lang_var = tk.StringVar(value='한국어 (ko)'); self.lang_combo = ttk.Combobox(r, textvariable=self.lang_var, values=['한국어 (ko)', '영어 (en)', '일본어 (ja)', '중국어 (zh)', '자동 감지 (auto)'], state='readonly', width=12); self.lang_combo.pack(side=tk.RIGHT)
         

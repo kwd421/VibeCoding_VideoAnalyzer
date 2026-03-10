@@ -85,7 +85,7 @@ class HyperTranscriptionEngine:
         return model_id
 
     def _detect_best_device(self, user_choice="auto"):
-        """[시니어 하드웨어 분석] 환경에 맞는 텐서 연산 장치 동적 스캔"""
+        """[??? ???? ??] ??? ?? ?? ?? ?? ?? ??"""
         if user_choice.startswith("cpu"):
             return "cpu"
         if user_choice != "auto":
