@@ -191,9 +191,7 @@ class CustomModelApp:
         self._overlay_drag = {"item_id": None, "mode": None, "start_x": 0, "start_y": 0, "origin": None}
         self._overlay_preview_cache = {}
         self._overlay_source_image_cache = {}
-        self._overlay_preview_source_cache = {}
         self._overlay_label_refs = {}
-        self._overlay_canvas_refs = {}
         self._overlay_resize_refresh_job = None
         self._overlay_prop_refresh_job = None
         self._overlay_resize_dirty_item = None
@@ -353,30 +351,17 @@ class CustomModelApp:
         self.video_frame.pack(fill=tk.BOTH, expand=True)
         self.video_canvas = tk.Frame(self.video_frame, bg='black')
         self.video_canvas.place(x=0, y=0, relwidth=1, relheight=1)
-        self._overlay_transparent_key = '#00FE00'
-        self.preview_overlay_window = tk.Toplevel(self.root)
-        self.preview_overlay_window.withdraw()
-        self.preview_overlay_window.overrideredirect(True)
-        try:
-            self.preview_overlay_window.attributes('-transparentcolor', self._overlay_transparent_key)
-        except tk.TclError:
-            pass
-        try:
-            self.preview_overlay_window.attributes('-topmost', True)
-        except tk.TclError:
-            pass
-        self.preview_overlay_window.configure(bg=self._overlay_transparent_key)
-        self.preview_overlay_canvas = tk.Canvas(self.preview_overlay_window, bg=self._overlay_transparent_key, highlightthickness=0, bd=0)
-        self.preview_overlay_canvas.pack(fill=tk.BOTH, expand=True)
+        self.preview_overlay_canvas = tk.Canvas(self.video_frame, bg='black', highlightthickness=0, bd=0)
+        self.preview_overlay_canvas.place_forget()
         self.preview_overlay_canvas.bind('<Button-1>', self.on_overlay_press)
         self.preview_overlay_canvas.bind('<B1-Motion>', self.on_overlay_drag)
         self.preview_overlay_canvas.bind('<ButtonRelease-1>', self.on_overlay_release)
-        self.overlay_resize_handle = tk.Frame(self.root, width=10, height=10, bg='#007AFF', cursor='bottom_right_corner')
+        self.overlay_resize_handle = tk.Frame(self.video_frame, width=10, height=10, bg='#007AFF', cursor='bottom_right_corner')
         self.overlay_resize_handle.place_forget()
         self.overlay_resize_handle.bind('<Button-1>', self.on_overlay_handle_press)
         self.overlay_resize_handle.bind('<B1-Motion>', self.on_overlay_drag)
         self.overlay_resize_handle.bind('<ButtonRelease-1>', self.on_overlay_release)
-        self.overlay_rotate_handle = tk.Frame(self.root, width=12, height=12, bg='#FF9F0A', cursor='exchange')
+        self.overlay_rotate_handle = tk.Frame(self.video_frame, width=12, height=12, bg='#FF9F0A', cursor='exchange')
         self.overlay_rotate_handle.place_forget()
         self.overlay_rotate_handle.bind('<Button-1>', self.on_overlay_rotate_press)
         self.overlay_rotate_handle.bind('<B1-Motion>', self.on_overlay_drag)
@@ -400,10 +385,10 @@ class CustomModelApp:
         bg_f.pack(expand=True)
         
         _bc = dict(font=_f, relief='flat', bd=0, compound='center', padx=10, pady=3, cursor='hand2')
-        b1 = tk.Button(bg_f, text='뒤로 5초', command=lambda: self.skip_time(-5000), bg=C['bg3'], fg=C['text'], width=8, **_bc); b1.pack(side=tk.LEFT, padx=4); _hover(b1, C['bg3'], C['border'])
-        self.btn_play = tk.Button(bg_f, text='재생', command=self.toggle_play, width=8, bg=C['accent'], fg='white', **_bc)
+        b1 = tk.Button(bg_f, text='  ' + chr(9194)+' 5s  ', command=lambda: self.skip_time(-5000), bg=C['bg3'], fg=C['text'], width=8, **_bc); b1.pack(side=tk.LEFT, padx=4); _hover(b1, C['bg3'], C['border'])
+        self.btn_play = tk.Button(bg_f, text='  ' + self.ICON_PLAY + '  ', command=self.toggle_play, width=8, bg=C['accent'], fg='white', **_bc)
         self.btn_play.pack(side=tk.LEFT, padx=4); _hover(self.btn_play, C['accent'], '#0062CC')
-        b2 = tk.Button(bg_f, text='앞으로 5초', command=lambda: self.skip_time(5000), bg=C['bg3'], fg=C['text'], width=8, **_bc); b2.pack(side=tk.LEFT, padx=4); _hover(b2, C['bg3'], C['border'])
+        b2 = tk.Button(bg_f, text='  5s '+chr(9193) + '  ', command=lambda: self.skip_time(5000), bg=C['bg3'], fg=C['text'], width=8, **_bc); b2.pack(side=tk.LEFT, padx=4); _hover(b2, C['bg3'], C['border'])
 
         self.lbl_time = tk.Label(ctrl, text='00:00 / 00:00', bg=C['bg2'], fg=C['text2'], font=_f)
         self.lbl_time.pack(side=tk.RIGHT, padx=16)
@@ -782,14 +767,14 @@ class CustomModelApp:
         self.export_format = tk.StringVar(value='SRT')
         self.export_format_combo = ctk.CTkComboBox(r, variable=self.export_format, values=['SRT', 'VTT', 'TXT', 'CSV', 'FCPXML'], width=140)
         self.export_format_combo.pack(side=tk.RIGHT)
-        self.btn_export_ass = _ctk_button(c4, '자막 내보내기', self.export_subtitles, kind='orange', height=38)
+        self.btn_export_ass = _ctk_button(c4, 'Export Subtitles', self.export_subtitles, kind='orange', height=38)
         self.btn_export_ass.pack(fill=tk.X, padx=16, pady=(8, 14))
 
         self.menu = tk.Menu(self.root, tearoff=0, bg=C['bg2'], fg=C['text'], activebackground=C['accent'], activeforeground='white', font=_f)
-        self.menu.add_command(label='시작 지점으로 이동', command=self.jump_to_start)
-        self.menu.add_command(label='종료 지점으로 이동', command=self.jump_to_end)
+        self.menu.add_command(label='?뱧 ?쒖옉 吏?먯쑝濡??대룞', command=self.jump_to_start)
+        self.menu.add_command(label='?뱧 醫낅즺 吏?먯쑝濡??대룞', command=self.jump_to_end)
         self.menu.add_separator()
-        self.menu.add_command(label='선택 대사 수정', command=self.edit_selected_text)
+        self.menu.add_command(label='?뱷 ????섏젙', command=self.edit_selected_text)
         
         self.tree.bind('<ButtonRelease-1>', self.on_tree_click)
         self.tree.bind('<Button-3>', self.show_context_menu)
@@ -1192,22 +1177,9 @@ class CustomModelApp:
             return
         item_id = selected.id
         self.overlay_manager.remove_item(item_id)
-        widget = self._overlay_label_refs.pop(item_id, None)
-        if widget is not None and widget.winfo_exists():
-            widget.destroy()
-        refs = self._overlay_canvas_refs.pop(item_id, None)
-        if refs:
-            for canvas_id in refs.get('markers', []):
-                try:
-                    self.preview_overlay_canvas.delete(canvas_id)
-                except tk.TclError:
-                    pass
-            image_id = refs.get('image')
-            if image_id:
-                try:
-                    self.preview_overlay_canvas.delete(image_id)
-                except tk.TclError:
-                    pass
+        label = self._overlay_label_refs.pop(item_id, None)
+        if label is not None and label.winfo_exists():
+            label.destroy()
         self._overlay_photo_refs.pop(item_id, None)
         self._invalidate_overlay_preview_cache(item_id)
         self.overlay_manager.set_selected(None)
@@ -1243,27 +1215,6 @@ class CustomModelApp:
     def _get_overlay_preview_size(self):
         _, _, w, h = self._get_video_viewport_rect()
         return w, h
-
-    def _get_overlay_layer_geometry(self):
-        viewport_x, viewport_y, viewport_w, viewport_h = self._get_video_viewport_rect()
-        return (
-            self.video_frame.winfo_rootx() + viewport_x,
-            self.video_frame.winfo_rooty() + viewport_y,
-            viewport_w,
-            viewport_h,
-        )
-
-    def _update_overlay_layer_window(self):
-        if not hasattr(self, 'preview_overlay_window') or not self.preview_overlay_window.winfo_exists():
-            return
-        x, y, w, h = self._get_overlay_layer_geometry()
-        if w <= 1 or h <= 1:
-            self.preview_overlay_window.withdraw()
-            return
-        self.preview_overlay_window.geometry(f'{w}x{h}+{x}+{y}')
-        self.preview_overlay_window.deiconify()
-        self.preview_overlay_window.lift(self.root)
-        self.preview_overlay_canvas.configure(width=w, height=h)
 
     def _get_overlay_cache_key(self, item_id, width, height):
         return (item_id, int(width), int(height))
@@ -1306,84 +1257,6 @@ class CustomModelApp:
     def _invalidate_overlay_preview_cache(self, item_id):
         self._overlay_preview_cache = {k: v for k, v in self._overlay_preview_cache.items() if k[0] != item_id}
 
-    def _sample_image_fill_rgba(self, src):
-        width, height = src.size
-        pts = [
-            src.getpixel((0, 0)),
-            src.getpixel((max(0, width - 1), 0)),
-            src.getpixel((0, max(0, height - 1))),
-            src.getpixel((max(0, width - 1), max(0, height - 1))),
-        ]
-        r = int(sum(p[0] for p in pts) / len(pts))
-        g = int(sum(p[1] for p in pts) / len(pts))
-        b = int(sum(p[2] for p in pts) / len(pts))
-        a = int(sum(p[3] for p in pts) / len(pts))
-        return (r, g, b, a)
-
-    def _remove_preview_matte(self, src, tolerance=18):
-        """Remove border-connected flat background from opaque preview assets.
-
-        This is preview-only cleanup so rotated ImageOverlay objects do not show a
-        rectangular plate when the source is a flat screenshot/card on a solid matte.
-        """
-        if src is None:
-            return None
-        alpha_min, alpha_max = src.getchannel('A').getextrema()
-        if alpha_min < 255:
-            return src
-        cache_key = (id(src), src.size, tolerance)
-        cached = self._overlay_preview_source_cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        arr = np.array(src, dtype=np.uint8)
-        if arr.size == 0:
-            return src
-        h, w = arr.shape[:2]
-        corner_rgb = np.array(self._sample_image_fill_rgba(src)[:3], dtype=np.int16)
-        rgb = arr[:, :, :3].astype(np.int16)
-        close = np.all(np.abs(rgb - corner_rgb) <= tolerance, axis=2)
-        if not close.any():
-            self._overlay_preview_source_cache[cache_key] = src
-            return src
-
-        visited = np.zeros((h, w), dtype=bool)
-        q = []
-        for x in range(w):
-            if close[0, x]:
-                q.append((0, x))
-            if close[h - 1, x]:
-                q.append((h - 1, x))
-        for y in range(h):
-            if close[y, 0]:
-                q.append((y, 0))
-            if close[y, w - 1]:
-                q.append((y, w - 1))
-
-        while q:
-            y, x = q.pop()
-            if visited[y, x] or not close[y, x]:
-                continue
-            visited[y, x] = True
-            if y > 0: q.append((y - 1, x))
-            if y + 1 < h: q.append((y + 1, x))
-            if x > 0: q.append((y, x - 1))
-            if x + 1 < w: q.append((y, x + 1))
-
-        keep_mask = ~visited
-        if keep_mask.sum() < max(64, int(w * h * 0.02)):
-            self._overlay_preview_source_cache[cache_key] = src
-            return src
-
-        arr2 = arr.copy()
-        arr2[visited, 3] = 0
-        cleaned = Image.fromarray(arr2, 'RGBA')
-        bbox = cleaned.getchannel('A').getbbox()
-        if bbox:
-            cleaned = cleaned.crop(bbox)
-        self._overlay_preview_source_cache[cache_key] = cleaned
-        return cleaned
-
     def _build_overlay_preview_image(self, item, width, height, draft=False):
         width = max(1, int(width))
         height = max(1, int(height))
@@ -1391,22 +1264,15 @@ class CustomModelApp:
             src = self._get_overlay_source_image(item.source)
             if src is None:
                 return None
-            preview_src = self._remove_preview_matte(src)
             resample = Image.BILINEAR if draft else Image.LANCZOS
-            img = preview_src.resize((width, height), resample)
-            alpha_min, alpha_max = preview_src.getchannel('A').getextrema()
-            has_transparency = alpha_min < 255
+            img = src.resize((width, height), resample)
             rotation = float(getattr(item, 'rotation', 0.0) or 0.0)
             if abs(rotation) > 0.01:
-                fill = (0, 0, 0, 0)
-                img = img.rotate(-rotation, expand=True, resample=Image.BICUBIC if not draft else Image.BILINEAR, fillcolor=fill)
+                img = img.rotate(-rotation, expand=True, resample=Image.BICUBIC if not draft else Image.BILINEAR, fillcolor=(0, 0, 0, 0))
             opacity = max(0.0, min(1.0, float(getattr(item, 'opacity', 1.0) or 1.0)))
             if opacity < 0.999:
                 alpha = img.getchannel('A').point(lambda value: int(value * opacity))
                 img.putalpha(alpha)
-            alpha_bbox = img.getchannel('A').getbbox()
-            if alpha_bbox:
-                img = img.crop(alpha_bbox)
             return img
         if item.type in ('text', 'subtitle'):
             img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
@@ -1430,105 +1296,46 @@ class CustomModelApp:
         return photo
 
     def _update_overlay_label(self, item, preview_w, preview_h, draft=False):
-        """Render overlay previews.
-
-        ImageOverlay uses the shared transparent overlay canvas so rotated images do not
-        expose a per-item rectangular widget surface. Text/subtitle overlays stay on the
-        older label path for now.
-        """
         viewport_x, viewport_y, _, _ = self._get_video_viewport_rect()
         x, y, w, h = self.overlay_manager.preview_rect(item, preview_w, preview_h)
         photo = self._load_overlay_photo(item, w, h, draft=draft)
         if photo is None:
             return None
-
         self._overlay_photo_refs[item.id] = photo
-        is_selected = item.id == self.overlay_manager.selected_item_id
-        is_image = item.type == 'image'
-        widget = self._overlay_label_refs.get(item.id)
-
-        if is_image:
-            display_w = max(1, int(photo.width()))
-            display_h = max(1, int(photo.height()))
-            center_x = x + (w / 2.0)
-            center_y = y + (h / 2.0)
-            canvas_x = int(round(center_x - (display_w / 2.0)))
-            canvas_y = int(round(center_y - (display_h / 2.0)))
-
-            stale_widget = self._overlay_label_refs.pop(item.id, None)
-            if stale_widget is not None and stale_widget.winfo_exists():
-                stale_widget.destroy()
-
-            refs = self._overlay_canvas_refs.get(item.id, {})
-            for canvas_id in refs.get('markers', []):
-                try:
-                    self.preview_overlay_canvas.delete(canvas_id)
-                except tk.TclError:
-                    pass
-            old_image_id = refs.get('image')
-            if old_image_id:
-                try:
-                    self.preview_overlay_canvas.delete(old_image_id)
-                except tk.TclError:
-                    pass
-
-            image_id = self.preview_overlay_canvas.create_image(canvas_x, canvas_y, image=photo, anchor='nw', tags=('overlay_image', item.id))
-            marker_ids = []
-            if is_selected:
-                color = '#FF9F0A'
-                corner = 12
-                lines = [
-                    (canvas_x, canvas_y, canvas_x + corner, canvas_y), (canvas_x, canvas_y, canvas_x, canvas_y + corner),
-                    (canvas_x + display_w, canvas_y, canvas_x + display_w - corner, canvas_y), (canvas_x + display_w, canvas_y, canvas_x + display_w, canvas_y + corner),
-                    (canvas_x, canvas_y + display_h, canvas_x + corner, canvas_y + display_h), (canvas_x, canvas_y + display_h, canvas_x, canvas_y + display_h - corner),
-                    (canvas_x + display_w, canvas_y + display_h, canvas_x + display_w - corner, canvas_y + display_h),
-                    (canvas_x + display_w, canvas_y + display_h, canvas_x + display_w, canvas_y + display_h - corner),
-                ]
-                for x1, y1, x2, y2 in lines:
-                    marker_ids.append(self.preview_overlay_canvas.create_line(x1, y1, x2, y2, fill=color, width=2, tags=('selection_marker', item.id)))
-            self._overlay_canvas_refs[item.id] = {
-                'image': image_id,
-                'markers': marker_ids,
-                'rect': (canvas_x, canvas_y, display_w, display_h),
-            }
-            return (canvas_x, canvas_y, display_w, display_h)
-
-        if widget is None or not widget.winfo_exists() or not isinstance(widget, tk.Label):
-            if widget is not None and widget.winfo_exists():
-                widget.destroy()
-            widget = tk.Label(self.video_frame, bd=0, highlightthickness=0, cursor='fleur')
-            widget.bind('<Button-1>', lambda e, item_id=item.id: self.on_overlay_item_press(item_id, e))
-            widget.bind('<B1-Motion>', self.on_overlay_drag)
-            widget.bind('<ButtonRelease-1>', self.on_overlay_release)
-            self._overlay_label_refs[item.id] = widget
-
-        if is_selected:
-            widget.configure(image=photo, highlightthickness=2, highlightbackground='#007AFF', highlightcolor='#007AFF', bd=1, relief='solid')
+        label = self._overlay_label_refs.get(item.id)
+        if label is None or not label.winfo_exists():
+            label = tk.Label(self.video_frame, bd=0, highlightthickness=0, cursor='fleur')
+            label.bind('<Button-1>', lambda e, item_id=item.id: self.on_overlay_item_press(item_id, e))
+            label.bind('<B1-Motion>', self.on_overlay_drag)
+            label.bind('<ButtonRelease-1>', self.on_overlay_release)
+            self._overlay_label_refs[item.id] = label
+        if item.id == self.overlay_manager.selected_item_id:
+            if item.type == 'image':
+                label.configure(image=photo, highlightthickness=0, bd=0, relief='flat')
+            else:
+                label.configure(image=photo, highlightthickness=2, highlightbackground='#007AFF', highlightcolor='#007AFF', bd=1, relief='solid')
         else:
-            widget.configure(image=photo, highlightthickness=0, bd=0, relief='flat')
-        widget.image = photo
+            label.configure(image=photo, highlightthickness=0, bd=0, relief='flat')
+        label.image = photo
         display_w = max(1, int(photo.width()))
         display_h = max(1, int(photo.height()))
         center_x = viewport_x + x + (w / 2.0)
         center_y = viewport_y + y + (h / 2.0)
         label_x = int(round(center_x - (display_w / 2.0)))
         label_y = int(round(center_y - (display_h / 2.0)))
-        widget.place(x=label_x, y=label_y, width=display_w, height=display_h)
-        widget.tk.call('raise', widget._w)
+        label.place(x=label_x, y=label_y, width=display_w, height=display_h)
+        label.lift()
         return (label_x, label_y, display_w, display_h)
 
     def _position_overlay_handle(self, rect):
         selected = self._get_any_overlay_item(self.overlay_manager.selected_item_id)
         if rect:
             x, y, w, h = rect
-            layer_x, layer_y, _, _ = self._get_overlay_layer_geometry()
-            abs_x = int(round(layer_x + x))
-            abs_y = int(round(layer_y + y))
-            self.overlay_resize_handle.place(x=max(0, abs_x + w - 10), y=max(0, abs_y + h - 10), width=10, height=10)
+            self.overlay_resize_handle.place(x=max(0, x + w - 10), y=max(0, y + h - 10), width=10, height=10)
             self.overlay_resize_handle.lift()
             if selected is not None and selected.type == 'image':
-                handle_x = max(0, abs_x + w + 6)
-                handle_y = max(12, abs_y - 6)
+                handle_x = max(0, x + w + 6)
+                handle_y = max(12, y - 6)
                 self.overlay_rotate_handle.place(x=handle_x, y=handle_y, width=12, height=12, anchor='sw')
                 self.overlay_rotate_handle.lift()
             else:
@@ -1611,13 +1418,7 @@ class CustomModelApp:
     def refresh_overlay_preview(self, time_sec=None):
         if not hasattr(self, 'preview_overlay_canvas'):
             return
-        self._update_overlay_layer_window()
         self._overlay_photo_refs = {}
-        self._overlay_canvas_refs = {}
-        try:
-            self.preview_overlay_canvas.delete('all')
-        except tk.TclError:
-            pass
         preview_w, preview_h = self._get_overlay_preview_size()
         now = self._get_overlay_time() if time_sec is None else time_sec
         self._overlay_last_visible_signature = self._compute_overlay_visible_signature(now)
@@ -1625,26 +1426,17 @@ class CustomModelApp:
         visible_ids = set()
         selected_id = self.overlay_manager.selected_item_id
         selected_rect = None
-        visible_image = False
         for item in visible_items:
             if item.type not in ('image', 'text', 'subtitle'):
                 continue
             visible_ids.add(item.id)
             rect = self._update_overlay_label(item, preview_w, preview_h, draft=False)
-            if item.type == 'image':
-                visible_image = True
             if item.id == selected_id:
                 selected_rect = rect
         for item_id, label in list(self._overlay_label_refs.items()):
             if item_id not in visible_ids and label.winfo_exists():
                 label.place_forget()
-        if visible_image:
-            self._update_overlay_layer_window()
-        else:
-            try:
-                self.preview_overlay_window.withdraw()
-            except tk.TclError:
-                pass
+        self.preview_overlay_canvas.place_forget()
         self._position_overlay_handle(selected_rect if selected_id in visible_ids else None)
 
     def _get_overlay_timeline_total_duration(self):
@@ -1886,31 +1678,16 @@ class CustomModelApp:
         selected = self.overlay_manager.get_selected()
         if selected is None:
             return None, None
-        if selected.type != 'image':
-            return None, None
-        refs = self._overlay_canvas_refs.get(selected.id)
-        if not refs or not refs.get('rect'):
-            return None, None
-        rx, ry, rw, rh = refs['rect']
-        if not (rx <= x <= rx + rw and ry <= y <= ry + rh):
-            return None, None
-        if x >= rx + rw - 12 and y >= ry + rh - 12:
-            return 'resize', selected.id
         return 'move', selected.id
 
     def on_overlay_rotate_press(self, event):
         selected = self.overlay_manager.get_selected()
         if selected is None or selected.type != 'image':
             return
-        refs = self._overlay_canvas_refs.get(selected.id)
-        if refs and refs.get('rect'):
-            x, y, w, h = refs['rect']
-        else:
-            preview_w, preview_h = self._get_overlay_preview_size()
-            x, y, w, h = self.overlay_manager.preview_rect(selected, preview_w, preview_h)
-        layer_x, layer_y, _, _ = self._get_overlay_layer_geometry()
-        cx = layer_x + x + (w / 2)
-        cy = layer_y + y + (h / 2)
+        preview_w, preview_h = self._get_overlay_preview_size()
+        x, y, w, h = self.overlay_manager.preview_rect(selected, preview_w, preview_h)
+        cx = self.video_frame.winfo_rootx() + x + (w / 2)
+        cy = self.video_frame.winfo_rooty() + y + (h / 2)
         start_angle = math.degrees(math.atan2(event.y_root - cy, event.x_root - cx))
         self._overlay_drag = {
             'item_id': selected.id,
@@ -2496,7 +2273,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             import traceback; traceback.print_exc()
             print(f'[ERROR] apply_preview_subtitles ?ㅽ뙣: {e}')
     def toggle_play(self):
-        if self.player: is_p = self.player.toggle_play(); self.btn_play.config(text='일시정지' if is_p else '재생')
+        if self.player: is_p = self.player.toggle_play(); self.btn_play.config(text=self.ICON_PAUSE if is_p else self.ICON_PLAY)
     def skip_time(self, ms): 
         if self.player: self.player.skip(ms)
     def on_seek_start(self, e):
@@ -2587,7 +2364,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 if hasattr(self, 'block_editor'):
                     self.block_editor.set_active_time(curr_sec)
 
-            if hasattr(self, 'btn_play'): self.btn_play.config(text='일시정지' if self.player.is_playing() else '재생')
+            if hasattr(self, 'btn_play'): self.btn_play.config(text=self.ICON_PAUSE if self.player.is_playing() else self.ICON_PLAY)
         
         # ?ㅼ떆媛꾩꽦 ?μ긽???꾪빐 16ms 二쇨린濡?蹂寃?(珥덈떦 ~60?꾨젅??
         self.root.after(16, self.update_loop)

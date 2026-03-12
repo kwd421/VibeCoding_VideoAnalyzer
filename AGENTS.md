@@ -25,6 +25,12 @@
 - Keep existing features working unless the task requires changing them.
 
 ## UI String And Encoding Rules
+- Do not directly replace user-facing Korean literals from shell inline commands.
+- Korean UI string edits should target explicit widget creation/configure calls, string tables, or clearly scoped string maps whenever possible.
+- Do not mix feature changes and Korean UI string repairs in the same turn.
+- After Korean UI string edits, verify actual widget text values instead of relying on source search alone.
+- Do not treat temporary English substitution as an acceptable fix for broken Korean UI.
+- After Korean UI edits, explicitly check tab text, button text, panel label text, and status text.
 - User-facing UI strings should default to Korean in this repository unless the task explicitly changes that policy.
 - If string or encoding damage appears, restore execution first, then explicitly check for user-facing language regressions before finishing.
 - If a broken string cannot be confidently reconstructed, replace it with a neutral Korean label instead of guessing the original wording.

@@ -61,6 +61,12 @@
   - subtitle adapter changes update override maps, not transcript source rows.
 
 ## UI Language And Encoding Rules
+- Do not insert Korean literals into `gui_app.py` through shell inline replace commands.
+- Read UTF-8 files as UTF-8 and write them back as UTF-8 only.
+- Korean UI string repairs should target actual widget creation/configure calls, string constants, or explicit label maps; unclear partial replacement is forbidden.
+- English substitution is not considered a completed recovery for broken Korean UI.
+- Korean UI repair turns must report actual widget text verification, not just source-level replacement.
+- If Korean UI strings remain scattered, note that longer-term string centralization is still needed.
 - `gui_app.py` has been normalized back to UTF-8; future edits should keep it UTF-8 unless a recovery task explicitly requires otherwise.
 - The default user-facing UI language in this repository is Korean.
 - When editing large files like `gui_app.py`, preserve source encoding first and avoid bulk string replacement without verification.

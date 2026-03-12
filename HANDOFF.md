@@ -92,6 +92,10 @@
 - No robust project save/load model for overlay state yet.
 
 ## String/Encoding Handoff Notes
+- Korean UI strings in this repository are easy to break through shell replacement or partial patching, especially inside `gui_app.py`.
+- Future Korean UI repair must avoid shell literal replacement, stay separate from feature edits, and verify actual widget text values.
+- Temporary English substitution is not a real fix for Korean UI regression.
+- `gui_app.py` user-facing strings should be checked against actual on-screen widget text, not only source text.
 - `gui_app.py` is now stored as UTF-8 again; the emergency `latin-1` dependency was removed after execution-safe normalization.
 - Some internal comments are still mojibake and can be cleaned up later, but the current priority state is: runnable source + correct Korean UI labels.
 - `gui_app.py` previously suffered from encoding damage, broken literals, and non-printable characters; it has been brought back to a runnable state through targeted recovery.
