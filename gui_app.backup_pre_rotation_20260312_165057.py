@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 import threading
 import time
@@ -68,19 +68,19 @@ class LblMarquee(tk.Canvas):
             x1 = self.coords(self.text1)[0]
             x2 = self.coords(self.text2)[0]
             
-            gap = 60 # ?띿뒪???ъ씠 媛꾧꺽 (?ъ슜???붿껌???곕씪 吏㏐쾶 議곗젙)
+            gap = 60 # 텍스트 사이 간격 (사용자 요청에 따라 짧게 조정)
             
-            # 泥?踰덉㎏ ?띿뒪?멸? ?붾㈃ ?쇱そ?쇰줈 ?꾩쟾???섍?硫???踰덉㎏ ?띿뒪???ㅻ줈 諛곗튂
+            # 첫 번째 텍스트가 화면 왼쪽으로 완전히 나가면 두 번째 텍스트 뒤로 배치
             if x1 < -tw:
                 self.coords(self.text1, x2 + tw + gap, self.winfo_height()//2)
-            # ??踰덉㎏ ?띿뒪?멸? ?붾㈃ ?쇱そ?쇰줈 ?꾩쟾???섍?硫?泥?踰덉㎏ ?띿뒪???ㅻ줈 諛곗튂 (?먮뒗 珥덇린????
+            # 두 번째 텍스트가 화면 왼쪽으로 완전히 나가면 첫 번째 텍스트 뒤로 배치 (또는 초기화 시)
             if x2 < -tw:
-                if x1 > vw: # 珥덇린 ?곹깭
+                if x1 > vw: # 초기 상태
                     self.coords(self.text2, x1 + tw + gap, self.winfo_height()//2)
                 else:
                     self.coords(self.text2, x1 + tw + gap, self.winfo_height()//2)
             
-            # 珥덇린 援щ룞 ????踰덉㎏ ?띿뒪???꾩튂 蹂댁젙
+            # 초기 구동 시 두 번째 텍스트 위치 보정
             if x2 < -tw and x1 <= 0:
                  self.coords(self.text2, x1 + tw + gap, self.winfo_height()//2)
 
@@ -118,11 +118,11 @@ class CustomModelApp:
         self.root.geometry("1300x850")
         self.root.configure(bg='#F2F2F7')
         
-        # [Apple HIG] ?쇱씠??紐⑤뱶 ?됱긽 ?붾젅??
+        # [Apple HIG] 라이트 모드 색상 팔레트
         self.C = {
             'bg':       '#F2F2F7',  # System Grouped Background
             'bg2':      '#FFFFFF',  # Card / Elevated
-            'bg3':      '#E1E1E6',  # Control Fill (?고븳 ?뚯깋)
+            'bg3':      '#E1E1E6',  # Control Fill (연한 회색)
             'surface':  '#E5E5EA',  # Surface / Separator
             'border':   '#E5E5E7',  # Border
             'text':     '#1D1D1F',  # Primary Label
@@ -136,7 +136,7 @@ class CustomModelApp:
         }
         C = self.C
         
-        # [Apple HIG] ttk ?ㅽ????뚮쭏
+        # [Apple HIG] ttk 스타일 테마
         style = ttk.Style()
         style.theme_use('clam')
         _font = ('Noto Sans KR', 10); _font_s = ('Noto Sans KR', 11); _font_h = ('Noto Sans KR', 11, 'bold')
@@ -145,14 +145,14 @@ class CustomModelApp:
         style.configure('TLabel', background=C['bg'], foreground=C['text'], font=_font)
         style.configure('TLabelframe', background=C['bg2'], foreground=C['text'])
         style.configure('TLabelframe.Label', background=C['bg2'], foreground=C['accent'], font=_font_h)
-        # Treeview rowheight瑜?34px濡?議곗젙 (11pt ?고듃 ???
-        # ?좏깮???됱쓽 ?됱긽???щ챸???먮굦???고뙆?묒쑝濡?議곗젙
+        # Treeview rowheight를 34px로 조정 (11pt 폰트 대응)
+        # 선택된 행의 색상을 투명한 느낌의 연파랑으로 조정
         style.map('Treeview', background=[('selected', '#E7F1FF')], foreground=[('selected', C['text'])])
         style.map('Treeview.Heading', background=[('active', C['bg3'])])
         
-        # [?ъ슜???붿껌] Treeview???섏쭅 援щ텇???먮굦 異붽?
+        # [사용자 요청] Treeview에 수직 구분선 느낌 추가
         style.configure('Treeview', borderwidth=1, relief='flat', background=C['bg2'], fieldbackground=C['bg2'])
-        # ???믪씠 諛?湲瑗??ㅼ젙 蹂듦뎄 (?댁쟾 ?먮뵩?먯꽌 ?꾨씫??遺遺?蹂닿컯)
+        # 행 높이 및 글꼴 설정 복구 (이전 에딧에서 누락된 부분 보강)
         style.configure('Treeview', rowheight=34, font=_font_s)
         style.configure('Treeview.Heading', background=C['bg2'], foreground=C['text2'], font=('Noto Sans KR', 10), borderwidth=0, relief='flat')
         
@@ -161,7 +161,7 @@ class CustomModelApp:
         style.configure('TNotebook.Tab', background=C['bg3'], foreground=C['text2'],
                          font=_font_s, padding=[14, 7], borderwidth=0)
         style.map('TNotebook.Tab', background=[('selected', C['accent'])], foreground=[('selected', '#ffffff')])
-        # 而대낫諛뺤뒪 ?꾨옒留??고븳 ?좎씠 ?덈뒗 Minimalist ?먮굦
+        # 컴보박스 아래만 연한 선이 있는 Minimalist 느낌
         style.configure('TCombobox', fieldbackground=C['bg2'], background=C['bg2'],
                          foreground=C['text'], arrowcolor=C['text2'], borderwidth=0, lightcolor=C['border'], darkcolor=C['bg'], bordercolor=C['bg2'], relief='flat')
         style.map('TCombobox', fieldbackground=[('readonly', C['bg2'])], foreground=[('readonly', C['text'])])
@@ -181,7 +181,7 @@ class CustomModelApp:
         self.ICON_PLAY = chr(9654); self.ICON_PAUSE = chr(9208)
         self.dispatcher = EventEmitter()
         self._ui_queue = queue.Queue()
-        # [?쒕땲?? ?깆쓽 ?ㅽ뻾 寃쎈줈 ?뺣? 異붿쟻 (System32 ???됰슧??CWD 諛⑹뼱)
+        # [시니어] 앱의 실행 경로 정밀 추적 (System32 등 엉뚱한 CWD 방어)
         self.base_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
         self.controller = AnalysisController(self.engine, self.video_editor, self.transcript_manager, self.dispatcher)
         self.overlay_manager = OverlayManager()
@@ -222,9 +222,9 @@ class CustomModelApp:
         self.load_engine_async()
         self.update_loop()
         
-        # [?쒕땲?? ?꾨줈洹몃옩 醫낅즺 ??李뚭볼湲??뚯씪 泥?냼 ?꾨줈?좎퐳 ?깅줉
+        # [시니어] 프로그램 종료 시 찌꺼기 파일 청소 프로토콜 등록
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-        self._report_startup_progress(100, '준비 완료')
+        self._report_startup_progress(100, "Ready")
 
     def on_closing(self):
         """Clean up temp files and stop background work before exit."""
@@ -293,8 +293,8 @@ class CustomModelApp:
         self.dispatcher.on("progress", lambda x: self._queue_ui(lambda: self._on_progress(x)))
         self.dispatcher.on("add_row", lambda x: self._queue_ui(lambda: self._on_add_row(x)))
         self.dispatcher.on("complete", lambda x: self._queue_ui(lambda: self._on_complete(x)))
-        self.dispatcher.on("message", lambda x: self._queue_ui(lambda: messagebox.showinfo('완료', x["text"])))
-        self.dispatcher.on("error", lambda x: self._queue_ui(lambda: messagebox.showerror('오류', x["text"])))
+        self.dispatcher.on("message", lambda x: self._queue_ui(lambda: messagebox.showinfo("Done", x["text"])))
+        self.dispatcher.on("error", lambda x: self._queue_ui(lambda: messagebox.showerror("Error", x["text"])))
         self.dispatcher.on("ghost_defense", lambda x: self._queue_ui(lambda: [self.reset_action_button(), self.btn_stop.configure(state=tk.DISABLED)]))
 
     def _on_progress(self, task):
@@ -305,7 +305,7 @@ class CustomModelApp:
         if hasattr(self, 'block_editor'):
             self.block_editor.render_block_view()
             
-        # [?ъ슜???붿껌] 遺꾩꽍 以??앹꽦?섎뒗 ?먮쭑???곸긽???ㅼ떆媛꾩쑝濡??낇옒 (?붾컮?댁뒪濡?遺???쒖뼱)
+        # [사용자 요청] 분석 중 생성되는 자막을 영상에 실시간으로 입힘 (디바운스로 부하 제어)
         if getattr(self, '_add_row_debounce', None):
             self.root.after_cancel(self._add_row_debounce)
         self._add_row_debounce = self.root.after(500, lambda: self.apply_preview_subtitles(force_reload=False))
@@ -331,14 +331,14 @@ class CustomModelApp:
             btn.bind('<Enter>', lambda e: btn.config(bg=h))
             btn.bind('<Leave>', lambda e: btn.config(bg=n))
         
-        # ?? 理쒖긽?? 醫뚯륫(鍮꾨뵒????꾨씪?? | ?곗륫(?몄뒪?숉꽣) ??
+        # ── 최상위: 좌측(비디오+타임라인) | 우측(인스펙터) ──
         self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashrelief=tk.FLAT, sashwidth=6, bg=C['border'])
         self.main_paned.pack(fill=tk.BOTH, expand=True)
         
         center_frame = tk.Frame(self.main_paned, bg=C['bg'])
         self.main_paned.add(center_frame, minsize=600, width=900)
         
-        # ?몃줈 遺꾪븷: ?곷떒(鍮꾨뵒?? | ?섎떒(??꾨씪??
+        # 세로 분할: 상단(비디오) | 하단(타임라인)
         self.v_paned = tk.PanedWindow(center_frame, orient=tk.VERTICAL, sashrelief=tk.FLAT, sashwidth=6, bg=C['border'])
         self.v_paned.pack(fill=tk.BOTH, expand=True)
         v_paned = self.v_paned
@@ -367,7 +367,14 @@ class CustomModelApp:
         self.overlay_rotate_handle.bind('<B1-Motion>', self.on_overlay_drag)
         self.overlay_rotate_handle.bind('<ButtonRelease-1>', self.on_overlay_release)
         self.video_frame.bind('<Button-1>', lambda e: self.toggle_play())
+        
+        # [?????????? ??? ??????????? ??? ?????? ??????????? ?????
         def _on_canvas_resize(e):
+            new_w = e.width
+            if new_w > 10:
+                new_h = int(new_w * self._video_aspect)
+                if new_h > 10 and abs(new_h - self.video_frame.winfo_height()) > 5:
+                    self.video_frame.config(height=new_h)
             self.refresh_overlay_preview()
         self.video_frame.bind("<Configure>", _on_canvas_resize)
 
@@ -393,31 +400,31 @@ class CustomModelApp:
         self.lbl_time = tk.Label(ctrl, text='00:00 / 00:00', bg=C['bg2'], fg=C['text2'], font=_f)
         self.lbl_time.pack(side=tk.RIGHT, padx=16)
         
-        # [?ъ슜???붿껌] ?먮쭑 ?ㅽ????ㅼ젙? '?숋툘 ?먮쭑 ?ㅼ젙' ??쑝濡??꾩쟾 ?닿???(?섎떒 肄붾뱶 李멸퀬)
+        # [사용자 요청] 자막 스타일 설정은 '⚙️ 자막 설정' 탭으로 완전 이관됨 (하단 코드 참고)
 
-        # ?먥븧??ZONE 2: ??꾨씪??(Bottom) ?먥븧??
+        # ═══ ZONE 2: 타임라인 (Bottom) ═══
         timeline_zone = tk.Frame(v_paned, bg=C['bg'])
         v_paned.add(timeline_zone, minsize=120, height=220)
         
         self.notebook = ttk.Notebook(timeline_zone)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         self.tab_canvas = tk.Frame(self.notebook, bg=C['bg'])
-        self.notebook.add(self.tab_canvas, text=' 단어 블록 ')
+        self.notebook.add(self.tab_canvas, text=' 🧩 단어 블록 ')
         self.tab_overlay = tk.Frame(self.notebook, bg=C['bg'])
-        self.notebook.add(self.tab_overlay, text=' 오버레이 타임라인 ')
+        self.notebook.add(self.tab_overlay, text=' Overlay Timeline ')
         
         self.tab_tree = tk.Frame(self.notebook, bg=C['bg2'])
-        self.notebook.add(self.tab_tree, text=' 자막 리스트 ')
+        self.notebook.add(self.tab_tree, text=' 📋 자막 리스트 ')
         
-        # [?ъ슜???붿껌] ?먮쭑 ?ㅼ젙 ??蹂꾨룄 遺꾨━
+        # [사용자 요청] 자막 설정 탭 별도 분리
         self.tab_style = tk.Frame(self.notebook, bg=C['bg'])
-        self.notebook.add(self.tab_style, text=' 자막 설정 ')
+        self.notebook.add(self.tab_style, text=' ⚙️ 자막 설정 ')
         self.notebook.select(self.tab_canvas)
         
-        # ?? ?먮쭑 由ъ뒪??Treeview ?ㅼ젙 ??
+        # ── 자막 리스트 Treeview 설정 ──
         self.tree = ttk.Treeview(self.tab_tree, columns=('no','start','end','text'), show='headings')
         self.tree.tag_configure('active', background='#D0E5FF')
-        self.tree.heading('no', text='#'); self.tree.heading('start', text='시작'); self.tree.heading('end', text='종료'); self.tree.heading('text', text='대사')
+        self.tree.heading('no', text='#'); self.tree.heading('start', text='시작'); self.tree.heading('end', text='종료'); self.tree.heading('text', text='내용')
         self.tree.column('no', width=34, anchor=tk.CENTER); self.tree.column('start', width=70, anchor=tk.CENTER); self.tree.column('end', width=70, anchor=tk.CENTER); self.tree.column('text', width=400)
         sc = ttk.Scrollbar(self.tab_tree, orient=tk.VERTICAL, command=self.tree.yview); self.tree.configure(yscrollcommand=sc.set)
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); sc.pack(side=tk.RIGHT, fill=tk.Y)
@@ -425,29 +432,29 @@ class CustomModelApp:
         self.block_editor = UIBlockEditor(self.tab_canvas, self.root, self.transcript_manager, lambda: self.player, self.rebuild_tree_and_render)
         def _on_tab_changed(e):
             idx = self.notebook.index(self.notebook.select())
-            if idx == 0: # ?⑥뼱 釉붾줉
+            if idx == 0: # 단어 블록
                 self.block_editor.render_block_view()
                 self.block_editor.block_canvas.yview_moveto(self.tree.yview()[0])
-            elif idx == 1: # ?먮쭑 由ъ뒪??
+            elif idx == 1: # 자막 리스트
                 self.tree.yview_moveto(self.block_editor.block_canvas.yview()[0])
         self.notebook.bind('<<NotebookTabChanged>>', _on_tab_changed)
         overlay_toolbar = tk.Frame(self.tab_overlay, bg=C['bg'])
         overlay_toolbar.pack(fill=tk.X, padx=8, pady=(8, 4))
-        self.btn_add_image_overlay = tk.Button(overlay_toolbar, text='이미지 오버레이 추가', command=self.add_image_overlay, bg=C['bg2'], fg=C['text'], relief='flat', bd=0, padx=10, pady=6, cursor='hand2')
+        self.btn_add_image_overlay = tk.Button(overlay_toolbar, text='Add Image Overlay', command=self.add_image_overlay, bg=C['bg2'], fg=C['text'], relief='flat', bd=0, padx=10, pady=6, cursor='hand2')
         self.btn_add_image_overlay.pack(side=tk.LEFT)
-        self.btn_add_text_overlay = tk.Button(overlay_toolbar, text='텍스트 오버레이 추가', command=self.add_text_overlay, bg=C['bg2'], fg=C['text'], relief='flat', bd=0, padx=10, pady=6, cursor='hand2')
+        self.btn_add_text_overlay = tk.Button(overlay_toolbar, text='Add Text Overlay', command=self.add_text_overlay, bg=C['bg2'], fg=C['text'], relief='flat', bd=0, padx=10, pady=6, cursor='hand2')
         self.btn_add_text_overlay.pack(side=tk.LEFT, padx=(6, 0))
         self.use_subtitle_adapter_var = tk.BooleanVar(value=False)
-        self.subtitle_adapter_check = tk.Checkbutton(overlay_toolbar, text='자막 어댑터', variable=self.use_subtitle_adapter_var, command=lambda: (self.refresh_overlay_preview(), self.refresh_overlay_timeline()), bg=C['bg'], fg=C['text'], selectcolor=C['bg3'], activebackground=C['bg'], activeforeground=C['text'], relief='flat', bd=0, highlightthickness=0, font=_f)
+        self.subtitle_adapter_check = tk.Checkbutton(overlay_toolbar, text='Subtitle Adapter', variable=self.use_subtitle_adapter_var, command=lambda: (self.refresh_overlay_preview(), self.refresh_overlay_timeline()), bg=C['bg'], fg=C['text'], selectcolor=C['bg3'], activebackground=C['bg'], activeforeground=C['text'], relief='flat', bd=0, highlightthickness=0, font=_f)
         self.subtitle_adapter_check.pack(side=tk.LEFT, padx=(8, 0))
-        tk.Label(overlay_toolbar, text='배율', bg=C['bg'], fg=C['text2'], font=_f).pack(side=tk.LEFT, padx=(12, 4))
+        tk.Label(overlay_toolbar, text='확대', bg=C['bg'], fg=C['text2'], font=_f).pack(side=tk.LEFT, padx=(12, 4))
         self.overlay_zoom_var = tk.StringVar(value='1x')
         self.overlay_zoom_combo = ttk.Combobox(overlay_toolbar, textvariable=self.overlay_zoom_var, state='readonly', width=6, values=('1x', '2x', '4x', '8x'))
         self.overlay_zoom_combo.pack(side=tk.LEFT)
         self.overlay_zoom_combo.bind('<<ComboboxSelected>>', lambda e: self.refresh_overlay_timeline())
         tk.Label(overlay_toolbar, text='스냅', bg=C['bg'], fg=C['text2'], font=_f).pack(side=tk.LEFT, padx=(12, 4))
-        self.overlay_snap_var = tk.StringVar(value='0.1초')
-        self.overlay_snap_combo = ttk.Combobox(overlay_toolbar, textvariable=self.overlay_snap_var, state='readonly', width=12, values=('끄기', '0.1초', '프레임'))
+        self.overlay_snap_var = tk.StringVar(value='0.1s')
+        self.overlay_snap_combo = ttk.Combobox(overlay_toolbar, textvariable=self.overlay_snap_var, state='readonly', width=12, values=('off', '0.1s', 'frame'))
         self.overlay_snap_combo.pack(side=tk.LEFT)
 
         overlay_body = tk.Frame(self.tab_overlay, bg=C['bg'])
@@ -479,7 +486,7 @@ class CustomModelApp:
         self.overlay_props_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.overlay_props_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         overlay_props = self.overlay_props_inner
-        tk.Label(overlay_props, text='오버레이 속성', bg=C['bg2'], fg=C['text'], font=('Noto Sans KR', 10, 'bold')).pack(anchor='w', padx=12, pady=(12, 8))
+        tk.Label(overlay_props, text='???? ??', bg=C['bg2'], fg=C['text'], font=('Noto Sans KR', 10, 'bold')).pack(anchor='w', padx=12, pady=(12, 8))
 
         def _overlay_prop_row(parent, key, label_text):
             row = tk.Frame(parent, bg=C['bg2'])
@@ -489,47 +496,45 @@ class CustomModelApp:
             ent.pack(side=tk.RIGHT, fill=tk.X, expand=True)
             self.overlay_prop_entries[key] = ent
 
-        _overlay_prop_row(overlay_props, 'text', '텍스트')
-        _overlay_prop_row(overlay_props, 'x', 'X 위치')
-        _overlay_prop_row(overlay_props, 'y', 'Y 위치')
-        _overlay_prop_row(overlay_props, 'width', '너비')
-        _overlay_prop_row(overlay_props, 'height', '높이')
-        _overlay_prop_row(overlay_props, 'start_time', '시작 시간')
-        _overlay_prop_row(overlay_props, 'end_time', '종료 시간')
-        _overlay_prop_row(overlay_props, 'opacity', '불투명도')
-        _overlay_prop_row(overlay_props, 'font_size', '글자 크기')
-        _overlay_prop_row(overlay_props, 'text_color', '글자색')
-        _overlay_prop_row(overlay_props, 'rotation', '회전')
+        _overlay_prop_row(overlay_props, 'text', 'text')
+        _overlay_prop_row(overlay_props, 'x', 'x')
+        _overlay_prop_row(overlay_props, 'y', 'y')
+        _overlay_prop_row(overlay_props, 'width', 'width')
+        _overlay_prop_row(overlay_props, 'height', 'height')
+        _overlay_prop_row(overlay_props, 'start_time', 'start')
+        _overlay_prop_row(overlay_props, 'end_time', 'end')
+        _overlay_prop_row(overlay_props, 'opacity', 'opacity')
+        _overlay_prop_row(overlay_props, 'font_size', 'font size')
+        _overlay_prop_row(overlay_props, 'text_color', 'text color')
+        _overlay_prop_row(overlay_props, 'rotation', 'rotation')
 
-        self.overlay_visible_check = tk.Checkbutton(overlay_props, text='표시', variable=self.overlay_prop_vars['visible'], command=self.on_toggle_selected_overlay_visible, bg=C['bg2'], fg=C['text'], selectcolor=C['bg3'], activebackground=C['bg2'], activeforeground=C['text'], relief='flat', bd=0, highlightthickness=0, font=_f)
+        self.overlay_visible_check = tk.Checkbutton(overlay_props, text='Visible', variable=self.overlay_prop_vars['visible'], command=self.on_toggle_selected_overlay_visible, bg=C['bg2'], fg=C['text'], selectcolor=C['bg3'], activebackground=C['bg2'], activeforeground=C['text'], relief='flat', bd=0, highlightthickness=0, font=_f)
         self.overlay_visible_check.pack(anchor='w', padx=12, pady=(6, 4))
 
         layer_btn_row1 = tk.Frame(overlay_props, bg=C['bg2'])
         layer_btn_row1.pack(fill=tk.X, padx=12, pady=(4, 3))
-        self.btn_overlay_forward = tk.Button(layer_btn_row1, text='한 단계 앞으로', command=lambda: self.reorder_selected_overlay('forward'), bg=C['bg3'], fg=C['text'], relief='flat', bd=0, padx=8, pady=6, cursor='hand2')
+        self.btn_overlay_forward = tk.Button(layer_btn_row1, text='Bring Forward', command=lambda: self.reorder_selected_overlay('forward'), bg=C['bg3'], fg=C['text'], relief='flat', bd=0, padx=8, pady=6, cursor='hand2')
         self.btn_overlay_forward.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
-        self.btn_overlay_backward = tk.Button(layer_btn_row1, text='한 단계 뒤로', command=lambda: self.reorder_selected_overlay('backward'), bg=C['bg3'], fg=C['text'], relief='flat', bd=0, padx=8, pady=6, cursor='hand2')
+        self.btn_overlay_backward = tk.Button(layer_btn_row1, text='Send Backward', command=lambda: self.reorder_selected_overlay('backward'), bg=C['bg3'], fg=C['text'], relief='flat', bd=0, padx=8, pady=6, cursor='hand2')
         self.btn_overlay_backward.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(3, 0))
 
         layer_btn_row2 = tk.Frame(overlay_props, bg=C['bg2'])
         layer_btn_row2.pack(fill=tk.X, padx=12, pady=(0, 6))
-        self.btn_overlay_front = tk.Button(layer_btn_row2, text='맨 앞으로', command=lambda: self.reorder_selected_overlay('front'), bg=C['bg3'], fg=C['text'], relief='flat', bd=0, padx=8, pady=6, cursor='hand2')
+        self.btn_overlay_front = tk.Button(layer_btn_row2, text='Bring to Front', command=lambda: self.reorder_selected_overlay('front'), bg=C['bg3'], fg=C['text'], relief='flat', bd=0, padx=8, pady=6, cursor='hand2')
         self.btn_overlay_front.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
-        self.btn_overlay_back = tk.Button(layer_btn_row2, text='맨 뒤로', command=lambda: self.reorder_selected_overlay('back'), bg=C['bg3'], fg=C['text'], relief='flat', bd=0, padx=8, pady=6, cursor='hand2')
+        self.btn_overlay_back = tk.Button(layer_btn_row2, text='Send to Back', command=lambda: self.reorder_selected_overlay('back'), bg=C['bg3'], fg=C['text'], relief='flat', bd=0, padx=8, pady=6, cursor='hand2')
         self.btn_overlay_back.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(3, 0))
 
-        self.btn_apply_overlay_props = tk.Button(overlay_props, text='속성 적용', command=self.apply_selected_overlay_properties, bg=C['accent'], fg='white', relief='flat', bd=0, padx=10, pady=6, cursor='hand2')
+        self.btn_apply_overlay_props = tk.Button(overlay_props, text='Apply Properties', command=self.apply_selected_overlay_properties, bg=C['accent'], fg='white', relief='flat', bd=0, padx=10, pady=6, cursor='hand2')
         self.btn_apply_overlay_props.pack(fill=tk.X, padx=12, pady=(6, 6))
-        self.btn_delete_overlay = tk.Button(overlay_props, text='선택 오버레이 삭제', command=self.delete_selected_overlay, bg=C['red'], fg='white', relief='flat', bd=0, padx=10, pady=6, cursor='hand2')
+        self.btn_delete_overlay = tk.Button(overlay_props, text='Delete Overlay', command=self.delete_selected_overlay, bg=C['red'], fg='white', relief='flat', bd=0, padx=10, pady=6, cursor='hand2')
         self.btn_delete_overlay.pack(fill=tk.X, padx=12, pady=(0, 6))
-        self.lbl_overlay_props = tk.Label(overlay_props, text='선택된 오버레이가 없습니다', bg=C['bg2'], fg=C['text2'], anchor='w', justify=tk.LEFT, font=_f)
+        self.lbl_overlay_props = tk.Label(overlay_props, text='No overlay selected', bg=C['bg2'], fg=C['text2'], anchor='w', justify=tk.LEFT, font=_f)
         self.lbl_overlay_props.pack(fill=tk.X, padx=12, pady=(0, 12))
         self.root.bind_all('<MouseWheel>', self._on_overlay_props_mousewheel, add='+')
-        self.root.bind_all('<Button-4>', self._on_overlay_props_mousewheel, add='+')
-        self.root.bind_all('<Button-5>', self._on_overlay_props_mousewheel, add='+')
         self.refresh_overlay_property_panel()
         
-        # ?먥븧??ZONE 3: ?몄뒪?숉꽣 ?⑤꼸 (Right) ?먥븧??
+        # ═══ ZONE 3: 인스펙터 패널 (Right) ═══
         inspector = tk.Frame(self.main_paned, bg=C['bg'])
         self.main_paned.add(inspector, minsize=280, width=340)
 
@@ -603,17 +608,17 @@ class CustomModelApp:
         def _check_mode(*_):
             mode = self.mode_var.get()
             if mode in ['Speech + Cut Edit', 'Auto Chapter Split (CLIP)']:
-                messagebox.showinfo('안내', '이 모드는 아직 준비되지 않았습니다.')
+                messagebox.showinfo('Notice', 'This mode is not ready yet.')
                 self.mode_var.set('Speech to Text')
             self.reset_action_button()
 
         self.mode_var.trace_add('write', _check_mode)
-        self.btn_analyze = _ctk_button(c2, '분석 시작', self.on_start_analysis, kind='primary', height=44)
+        self.btn_analyze = _ctk_button(c2, 'Start Analysis', self.on_start_analysis, kind='primary', height=44)
         self.btn_analyze.pack(fill=tk.X, padx=16, pady=(0, 6))
-        self.btn_stop = _ctk_button(c2, '작업 중지', self.on_stop_action, kind='danger', height=38)
+        self.btn_stop = _ctk_button(c2, 'Stop Task', self.on_stop_action, kind='danger', height=38)
         self.btn_stop.pack(fill=tk.X, padx=16)
         self.btn_stop.configure(state=tk.DISABLED)
-        self.lbl_status = LblMarquee(c2, text='준비 완료', fg=C['green'], bg=C['bg2'], font=_f)
+        self.lbl_status = LblMarquee(c2, text='Ready', fg=C['green'], bg=C['bg2'], font=_f)
         self.lbl_status.pack(fill=tk.X, padx=16, pady=(8, 0))
         self.progress_var = tk.DoubleVar()
         ttk.Progressbar(c2, variable=self.progress_var).pack(fill=tk.X, padx=16, pady=(6, 0))
@@ -650,7 +655,7 @@ class CustomModelApp:
 
         def _check_whisperx(*_):
             if self.use_whisperx_var.get():
-                messagebox.showinfo('안내', 'WhisperX는 아직 지원되지 않습니다.')
+                messagebox.showinfo('Notice', 'WhisperX is not supported yet.')
                 self.use_whisperx_var.set(False)
 
         self.use_whisperx_var.trace_add('write', _check_whisperx)
@@ -771,33 +776,35 @@ class CustomModelApp:
         self.btn_export_ass.pack(fill=tk.X, padx=16, pady=(8, 14))
 
         self.menu = tk.Menu(self.root, tearoff=0, bg=C['bg2'], fg=C['text'], activebackground=C['accent'], activeforeground='white', font=_f)
-        self.menu.add_command(label='?뱧 ?쒖옉 吏?먯쑝濡??대룞', command=self.jump_to_start)
-        self.menu.add_command(label='?뱧 醫낅즺 吏?먯쑝濡??대룞', command=self.jump_to_end)
+        self.menu.add_command(label='📍 시작 지점으로 이동', command=self.jump_to_start)
+        self.menu.add_command(label='📍 종료 지점으로 이동', command=self.jump_to_end)
         self.menu.add_separator()
-        self.menu.add_command(label='?뱷 ????섏젙', command=self.edit_selected_text)
+        self.menu.add_command(label='📝 대사 수정', command=self.edit_selected_text)
         
         self.tree.bind('<ButtonRelease-1>', self.on_tree_click)
         self.tree.bind('<Button-3>', self.show_context_menu)
 
-        # [Apple HIG] PanedWindow ?몃뱾 ?쒓컖??(Vrew ?ㅽ???
+        # [Apple HIG] PanedWindow 핸들 시각화 (Vrew 스타일)
+        self._add_sash_handle(self.main_paned, 'h')
+        self._add_sash_handle(self.v_paned, 'v')
 
-        # [Ctrl+?? ?먮쭑 ?쒖옉/醫낅즺 ?쒓컙 짹50ms 誘몄꽭 議곗젙 (Apple HIG)
+        # [Ctrl+휠] 자막 시작/종료 시간 ±50ms 미세 조정 (Apple HIG)
         def _on_ctrl_wheel(e):
-            if not (e.state & 0x4): return # Ctrl ???뚮┝ -> 湲곕낯 ?ㅽ겕濡??덉슜
+            if not (e.state & 0x4): return # Ctrl 안 눌림 -> 기본 스크롤 허용
             
-            # [?ъ슜???붿껌] Ctrl ?뚮┛ 寃쎌슦, ?쒓컙 議곗젅 媛???곸뿭???꾨땲?붾씪???ㅽ겕濡?李⑤떒
+            # [사용자 요청] Ctrl 눌린 경우, 시간 조절 가능 영역이 아니더라도 스크롤 차단
             item = self.tree.identify_row(e.y)
             col = self.tree.identify_column(e.x)
             if item and col in ('#2', '#3'):
                 try:
                     idx = int(self.tree.item(item)['values'][0]) - 1
                     if 0 <= idx < len(self.results_data):
-                        # ??諛⑺뼢 諛섏쟾: ?꾨줈(delta>0) ?щ━硫??쒓컙 媛먯냼(-), ?꾨옒濡?delta<0) ?대━硫??쒓컙 利앷?(+)
+                        # 휠 방향 반전: 위로(delta>0) 올리면 시간 감소(-), 아래로(delta<0) 내리면 시간 증가(+)
                         delta = -0.05 if e.delta > 0 else 0.05
                         key = 's' if col == '#2' else 'e'
                         nv = max(0, self.results_data[idx][key] + delta)
                         
-                        # ?덉쟾?μ튂 諛?李⑤떒 濡쒖쭅
+                        # 안전장치 및 차단 로직
                         valid = True
                         if key == 's':
                             if nv >= self.results_data[idx]['e'] or (idx > 0 and nv < self.results_data[idx-1]['e']): valid = False
@@ -808,7 +815,7 @@ class CustomModelApp:
                             self.transcript_manager.save_state()
                             self.results_data[idx][key] = round(nv, 3)
                             
-                            # [?쒕땲??理쒖쟻?? ?대? ?⑥뼱 ??꾩뒪?ы봽 ?숆린??(Word Block 酉곗? ?쇨????좎?)
+                            # [시니어 최적화] 내부 단어 타임스탬프 동기화 (Word Block 뷰와 일관성 유지)
                             words = self.results_data[idx].get('words', [])
                             if words:
                                 if key == 's': words[0]['s'] = nv
@@ -818,8 +825,8 @@ class CustomModelApp:
                             self.player.set_time(int(nv * 1000))
                             self.player.play()
                             self.apply_preview_subtitles(force_reload=True)
-                except Exception as e: print(f'[WARN] Ctrl+???쒓컙 議곗젅 ?ㅻ쪟: {e}')
-            return 'break' # Ctrl ?뚮┛ ?곹깭?먯꽑 議곗젅 ?깃났 ?щ?? 臾닿??섍쾶 ?ㅽ겕濡?諛⑹?
+                except Exception as e: print(f'[WARN] Ctrl+휠 시간 조절 오류: {e}')
+            return 'break' # Ctrl 눌린 상태에선 조절 성공 여부와 무관하게 스크롤 방지
         self.tree.bind('<MouseWheel>', _on_ctrl_wheel)
 
 
@@ -831,24 +838,24 @@ class CustomModelApp:
 
 
     def _open_font_picker(self):
-        """?쒖뒪???고듃 ?꾩껜瑜??먯껜 ?쒖껜濡?誘몃━蹂닿린?섎ŉ 寃???좏깮?섎뒗 ?앹뾽"""
+        """시스템 폰트 전체를 자체 서체로 미리보기하며 검색/선택하는 팝업"""
         popup = tk.Toplevel(self.root)
-        popup.title("?고듃 ?좏깮")
+        popup.title("폰트 선택")
         popup.geometry("380x500")
         popup.configure(bg=self.C['bg'])
         popup.transient(self.root)
         popup.grab_set()
         
-        # ?쒖뒪???고듃 紐⑸줉 (以묐났 ?쒓굅 + ?뺣젹)
+        # 시스템 폰트 목록 (중복 제거 + 정렬)
         all_fonts = sorted(set(tkfont.families()), key=str.lower)
         
-        # 寃???낅젰李?
+        # 검색 입력창
         search_var = tk.StringVar()
         search_entry = tk.Entry(popup, textvariable=search_var, font=('Noto Sans KR', 11), bg=self.C['bg2'], fg=self.C['text'], insertbackground=self.C['text'], relief=tk.FLAT)
         search_entry.pack(fill=tk.X, padx=14, pady=(14, 8))
         search_entry.focus_set()
         
-        # ?고듃 由ъ뒪??(Text ?꾩젽 + ?ㅽ겕濡ㅻ컮)
+        # 폰트 리스트 (Text 위젯 + 스크롤바)
         list_frame = tk.Frame(popup, bg=self.C['bg'])
         list_frame.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
         
@@ -890,27 +897,27 @@ class CustomModelApp:
 
     def bind_keys(self):
         def _is_editing():
-            """?꾩옱 ?ъ빱?ㅺ? ?띿뒪???몄쭛 ?꾩젽???덉쑝硫?True (???대깽??李⑤떒)"""
+            """현재 포커스가 텍스트 편집 위젯에 있으면 True (키 이벤트 차단)"""
             w = self.root.focus_get()
             return isinstance(w, (tk.Entry, tk.Text))
 
         def _on_space(e):
-            if _is_editing(): return  # ?몄쭛 以묒뿏 ?ㅽ럹?댁뒪諛붾? ?꾩젽???섍?
+            if _is_editing(): return  # 편집 중엔 스페이스바를 위젯에 넘김
             self.toggle_play()
             return "break"
 
         def _on_left(e):
-            if _is_editing(): return  # ?몄쭛 以묒뿏 醫뚮갑?ν궎瑜??꾩젽???섍?
+            if _is_editing(): return  # 편집 중엔 좌방향키를 위젯에 넘김
             self.skip_time(-5000)
             return "break"
 
         def _on_right(e):
-            if _is_editing(): return  # ?몄쭛 以묒뿏 ?곕갑?ν궎瑜??꾩젽???섍?
+            if _is_editing(): return  # 편집 중엔 우방향키를 위젯에 넘김
             self.skip_time(5000)
             return "break"
 
         def _on_undo(e):
-            if _is_editing(): return # ?몄쭛 以묒씤 ?띿뒪?몄쓽 undo???쒖뒪?쒖뿉 留↔?
+            if _is_editing(): return # 편집 중인 텍스트의 undo는 시스템에 맡김
             if self.transcript_manager.undo():
                 self.rebuild_tree_and_render()
             return "break"
@@ -928,7 +935,7 @@ class CustomModelApp:
         self.root.bind_all("<Control-y>", _on_redo)
         self.root.bind_all("<Control-Z>", _on_redo) # Shift+Z
 
-        # [?ъ슜???붿껌] ??씠??由ъ뒪?몄뿉 ?ъ빱?ㅺ? ?덉쓣 ??諛⑺뼢?ㅻ줈 硫붾돱媛 ?섏뼱媛??Tkinter 湲곕낯 ?숈옉 李⑤떒
+        # [사용자 요청] 탭이나 리스트에 포커스가 있을 때 방향키로 메뉴가 넘어가는 Tkinter 기본 동작 차단
         try:
             self.root.unbind_class('TNotebook', '<Left>')
             self.root.unbind_class('TNotebook', '<Right>')
@@ -951,7 +958,7 @@ class CustomModelApp:
 
     def reset_action_button(self):
         self.save_frame.pack_forget()
-        self.btn_analyze.configure(text='분석 시작', command=self.on_start_analysis, state=tk.NORMAL)
+        self.btn_analyze.configure(text='Start Analysis', command=self.on_start_analysis, state=tk.NORMAL)
         self.btn_fast_save.configure(state=tk.NORMAL)
         self.btn_pro_save.configure(state=tk.NORMAL)
 
@@ -1070,7 +1077,7 @@ class CustomModelApp:
                     var.set(False)
                 else:
                     var.set('')
-            self.lbl_overlay_props.config(text='선택된 오버레이가 없습니다')
+            self.lbl_overlay_props.config(text='No overlay selected')
             for ent in self.overlay_prop_entries.values():
                 ent.configure(state=tk.DISABLED)
             for btn in [self.btn_apply_overlay_props, self.btn_overlay_forward, self.btn_overlay_backward, self.btn_overlay_front, self.btn_overlay_back, self.overlay_visible_check]:
@@ -1092,9 +1099,9 @@ class CustomModelApp:
         for key, value in values.items():
             self.overlay_prop_vars[key].set(value)
         self.overlay_prop_vars['visible'].set(bool(selected.visible))
-        vis_text = '켜짐' if selected.visible else '꺼짐'
+        vis_text = 'On' if selected.visible else 'Off'
         name = selected.text if selected.type == 'text' else os.path.basename(selected.source or selected.id)
-        self.lbl_overlay_props.config(text=f'선택: {name}\n유형: {selected.type}\n레이어: {selected.layer_index}\n표시: {vis_text}')
+        self.lbl_overlay_props.config(text=f'Selected: {name}\nType: {selected.type}\nLayer: {selected.layer_index}\nVisible: {vis_text}')
         for key, ent in self.overlay_prop_entries.items():
             if key in ('text', 'font_size', 'text_color') and selected.type != 'text':
                 ent.configure(state=tk.DISABLED)
@@ -1147,7 +1154,7 @@ class CustomModelApp:
                     raise ValueError
                 selected.text_color = color
         except ValueError:
-            messagebox.showerror('오류', '오버레이 속성은 올바른 숫자여야 합니다.')
+            messagebox.showerror('Error', 'Overlay properties must be valid numbers.')
             return
         self._invalidate_overlay_preview_cache(selected.id)
         self.refresh_overlay_preview()
@@ -1193,27 +1200,9 @@ class CustomModelApp:
             self.refresh_overlay_timeline()
             self.refresh_overlay_property_panel()
 
-    def _get_video_viewport_rect(self):
-        frame_w = max(1, self.video_frame.winfo_width())
-        frame_h = max(1, self.video_frame.winfo_height())
-        render_w = max(1, int(getattr(self.overlay_manager, 'render_width', 1920) or 1920))
-        render_h = max(1, int(getattr(self.overlay_manager, 'render_height', 1080) or 1080))
-        frame_ratio = frame_w / frame_h
-        render_ratio = render_w / render_h
-        if frame_ratio > render_ratio:
-            viewport_h = frame_h
-            viewport_w = int(round(viewport_h * render_ratio))
-            viewport_x = (frame_w - viewport_w) // 2
-            viewport_y = 0
-        else:
-            viewport_w = frame_w
-            viewport_h = int(round(viewport_w / render_ratio))
-            viewport_x = 0
-            viewport_y = (frame_h - viewport_h) // 2
-        return viewport_x, viewport_y, max(1, viewport_w), max(1, viewport_h)
-
     def _get_overlay_preview_size(self):
-        _, _, w, h = self._get_video_viewport_rect()
+        w = max(1, self.video_frame.winfo_width())
+        h = max(1, self.video_frame.winfo_height())
         return w, h
 
     def _get_overlay_cache_key(self, item_id, width, height):
@@ -1268,11 +1257,13 @@ class CustomModelApp:
             img = src.resize((width, height), resample)
             rotation = float(getattr(item, 'rotation', 0.0) or 0.0)
             if abs(rotation) > 0.01:
-                img = img.rotate(-rotation, expand=True, resample=Image.BICUBIC if not draft else Image.BILINEAR, fillcolor=(0, 0, 0, 0))
-            opacity = max(0.0, min(1.0, float(getattr(item, 'opacity', 1.0) or 1.0)))
-            if opacity < 0.999:
-                alpha = img.getchannel('A').point(lambda value: int(value * opacity))
-                img.putalpha(alpha)
+                rotated = img.rotate(-rotation, expand=True, resample=Image.BICUBIC if not draft else Image.BILINEAR, fillcolor=(0, 0, 0, 0))
+                fitted = ImageOps.contain(rotated, (width, height), Image.BICUBIC if not draft else Image.BILINEAR)
+                canvas_img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+                px = (width - fitted.width) // 2
+                py = (height - fitted.height) // 2
+                canvas_img.alpha_composite(fitted, (px, py))
+                img = canvas_img
             return img
         if item.type in ('text', 'subtitle'):
             img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
@@ -1296,7 +1287,6 @@ class CustomModelApp:
         return photo
 
     def _update_overlay_label(self, item, preview_w, preview_h, draft=False):
-        viewport_x, viewport_y, _, _ = self._get_video_viewport_rect()
         x, y, w, h = self.overlay_manager.preview_rect(item, preview_w, preview_h)
         photo = self._load_overlay_photo(item, w, h, draft=draft)
         if photo is None:
@@ -1310,22 +1300,13 @@ class CustomModelApp:
             label.bind('<ButtonRelease-1>', self.on_overlay_release)
             self._overlay_label_refs[item.id] = label
         if item.id == self.overlay_manager.selected_item_id:
-            if item.type == 'image':
-                label.configure(image=photo, highlightthickness=0, bd=0, relief='flat')
-            else:
-                label.configure(image=photo, highlightthickness=2, highlightbackground='#007AFF', highlightcolor='#007AFF', bd=1, relief='solid')
+            label.configure(image=photo, highlightthickness=2, highlightbackground='#007AFF', highlightcolor='#007AFF', bd=1, relief='solid')
         else:
             label.configure(image=photo, highlightthickness=0, bd=0, relief='flat')
         label.image = photo
-        display_w = max(1, int(photo.width()))
-        display_h = max(1, int(photo.height()))
-        center_x = viewport_x + x + (w / 2.0)
-        center_y = viewport_y + y + (h / 2.0)
-        label_x = int(round(center_x - (display_w / 2.0)))
-        label_y = int(round(center_y - (display_h / 2.0)))
-        label.place(x=label_x, y=label_y, width=display_w, height=display_h)
+        label.place(x=int(x), y=int(y), width=max(1, int(w)), height=max(1, int(h)))
         label.lift()
-        return (label_x, label_y, display_w, display_h)
+        return (int(x), int(y), max(1, int(w)), max(1, int(h)))
 
     def _position_overlay_handle(self, rect):
         selected = self._get_any_overlay_item(self.overlay_manager.selected_item_id)
@@ -1334,9 +1315,7 @@ class CustomModelApp:
             self.overlay_resize_handle.place(x=max(0, x + w - 10), y=max(0, y + h - 10), width=10, height=10)
             self.overlay_resize_handle.lift()
             if selected is not None and selected.type == 'image':
-                handle_x = max(0, x + w + 6)
-                handle_y = max(12, y - 6)
-                self.overlay_rotate_handle.place(x=handle_x, y=handle_y, width=12, height=12, anchor='sw')
+                self.overlay_rotate_handle.place(x=max(0, x + w + 6), y=max(0, y + h + 6), width=12, height=12)
                 self.overlay_rotate_handle.lift()
             else:
                 self.overlay_rotate_handle.place_forget()
@@ -1366,18 +1345,10 @@ class CustomModelApp:
             return
         if not self._is_overlay_props_widget(getattr(event, 'widget', None)):
             return
-        if getattr(event, 'num', None) == 4:
-            units = -3
-        elif getattr(event, 'num', None) == 5:
-            units = 3
-        else:
-            delta = getattr(event, 'delta', 0)
-            if delta == 0:
-                return
-            units = int(-1 * (delta / 120)) * 3
-            if units == 0:
-                units = -3 if delta > 0 else 3
-        self.overlay_props_canvas.yview_scroll(units, 'units')
+        delta = getattr(event, 'delta', 0)
+        if delta == 0:
+            return
+        self.overlay_props_canvas.yview_scroll(int(-1 * (delta / 120)), 'units')
         return 'break'
 
     def _schedule_resize_preview_refresh(self, item_id, delay=40):
@@ -1478,10 +1449,10 @@ class CustomModelApp:
 
     def _get_timeline_snap_seconds(self):
         mode = getattr(self, 'overlay_snap_var', None)
-        mode = mode.get() if mode else '끄기'
-        if mode == '0.1초':
+        mode = mode.get() if mode else 'off'
+        if mode == '0.1s':
             return 0.1
-        if mode == '프레임':
+        if mode == 'frame':
             fps = float(getattr(self, '_timeline_fps', 30.0) or 30.0)
             return 1.0 / max(1.0, fps)
         return None
@@ -1561,7 +1532,7 @@ class CustomModelApp:
         track_specs = [(idx, track.name, sorted(track.items, key=lambda ov: (ov.layer_index, ov.id))) for idx, track in enumerate(self.overlay_manager.tracks)]
         subtitle_items = self._get_subtitle_adapter_items()
         if subtitle_items:
-            track_specs.append((len(track_specs), '자막 어댑터', subtitle_items))
+            track_specs.append((len(track_specs), 'Subtitle Adapter', subtitle_items))
         self._draw_overlay_timeline_ruler(total_duration, width, ruler_h)
         for track_idx, track_name, track_items in track_specs:
             y1 = top_pad + ruler_h + track_idx * row_h
@@ -1809,7 +1780,7 @@ class CustomModelApp:
         self._overlay_drag = {'item_id': None, 'mode': None, 'start_x': 0, 'start_y': 0, 'origin': None}
 
     def apply_vlc_sub_settings(self):
-        """[ASS ?レ뒪?? ?붿옄??蹂寃???ASS ?뚯씪留??ъ깮?깊븯??VLC??利됱떆 濡쒕뱶"""
+        """[ASS 핫스왓] 디자인 변경 시 ASS 파일만 재생성하여 VLC에 즉시 로드"""
         self.apply_preview_subtitles(force_reload=False)
 
     def on_select_video(self):
@@ -1817,7 +1788,7 @@ class CustomModelApp:
         if p:
             self.current_video_path = p
             
-            # 湲곗〈??濡쒕뱶???먮쭑 ?뚯씪 ?곌껐 ?딄린
+            # 기존에 로드된 자막 파일 연결 끊기
             if hasattr(self, 'preview_srt_path'):
                 self.preview_srt_path = None
                 
@@ -1830,37 +1801,42 @@ class CustomModelApp:
                 def _resize():
                     w, h = self.player.get_video_resolution()
                     if w > 0 and h > 0:
-                        self._video_aspect = h / w
-                        self.overlay_manager.render_width = w
-                        self.overlay_manager.render_height = h
-                        self.refresh_overlay_preview()
+                        self._video_aspect = h / w  # 영상 비율 저장
+                        cw = self.video_canvas.winfo_width()
+                        if cw < 10: cw = 500
+                        new_h = int(cw * self._video_aspect)
+                        if new_h > 10:
+                            self.video_frame.config(height=new_h)
+                            self.overlay_manager.render_width = w
+                            self.overlay_manager.render_height = h
+                            self.refresh_overlay_preview()
                     self.video_canvas.pack_propagate(False)
                 self.root.after(500, _resize)
                 
-                self.lbl_status.config(text='영상 로드됨: ' + os.path.basename(p), fg=self.C['accent'])
+                self.lbl_status.config(text="영상 로드됨: " + os.path.basename(p), fg=self.C['accent'])
                 self.reset_action_button()
                 
                 if hasattr(self, 'preview_srt_path') and getattr(self, 'preview_srt_path') and os.path.exists(self.preview_srt_path):
                     self.root.after(300, self.apply_preview_subtitles)
             else:
                 from tkinter import messagebox
-                messagebox.showerror('오류', '영상을 먼저 불러와 주세요.')
+                messagebox.showerror("Error", "영상을 불러올 수 없습니다.")
 
 
     def on_stop_action(self):
         if self.stop_event and not self.stop_event.is_set(): 
             self.stop_event.set()
-            # ?먮? ?꾩쟾 利앸컻 ?쒗궗 ?꾩슂媛 ?놁뼱吏?(?대깽??援щ룆 援ъ“?대?濡?stop_event媛 set?섎㈃ 而⑦듃濡ㅻ윭媛 諛쒖넚 以묐떒??
-            self.lbl_status.config(text="진행 중인 작업을 중지하는 중...", fg=self.C['red'])
+            # 큐를 완전 증발 시킬 필요가 없어짐 (이벤트 구독 구조이므로 stop_event가 set되면 컨트롤러가 발송 중단함)
+            self.lbl_status.config(text="■ 작업 중지 중... 완전 종료 대기", fg=self.C['red'])
             self.btn_stop.configure(state=tk.DISABLED)
-            self.root.after(1500, lambda: self.reset_action_button() or self.lbl_status.config(text="작업이 중지되었습니다.", fg=self.C['red']))
+            self.root.after(1500, lambda: self.reset_action_button() or self.lbl_status.config(text="작업 중지됨", fg=self.C['red']))
 
     def on_start_analysis(self):
         mode = self.mode_var.get()
         selected_model = self.ai_model_var.get().split(" ")[0]
         self.engine.set_model_id(selected_model)
         
-        # [?쒕땲??異붽?] 遺꾩꽍 ?듭뀡 ?섏쭛
+        # [시니어 추가] 분석 옵션 수집
         try: min_sil_ms, pad_ms = int(self.silence_dur_var.get() * 1000), int(self.speech_pad_var.get() * 1000)
         except: min_sil_ms, pad_ms = 2000, 250
         
@@ -1892,7 +1868,7 @@ class CustomModelApp:
         self.stop_event = threading.Event(); self.btn_analyze.configure(state=tk.DISABLED); self.btn_stop.configure(state=tk.NORMAL); self.progress_var.set(0); self.results_data = []
         for i in self.tree.get_children(): self.tree.delete(i)
         
-        # 而⑦듃濡ㅻ윭???묒뾽 ?닿?
+        # 컨트롤러에 작업 이관
         max_chars = self.max_len_int.get()
         threading.Thread(target=self.controller.run_analysis, args=(self.current_video_path, self.stop_event, mode, min_sil_ms, pad_ms, max_chars, analysis_options), daemon=True).start()
 
@@ -1944,21 +1920,21 @@ class CustomModelApp:
             for b in [self.btn_fast_save, self.btn_pro_save]: b.configure(state=tk.DISABLED)
             self.btn_stop.configure(state=tk.NORMAL); self.progress_var.set(0)
             
-            # [?쒕땲?? ?먮쭑 ?⑹튂湲?Burn) ?듭뀡 泥섎━
+            # [시니어] 자막 합치기(Burn) 옵션 처리
             ass_path_final = None
             if self.use_burn_sub_var.get():
                 try:
-                    # 1. 蹂묓빀 ?멸렇癒쇳듃 ?뺣낫 怨꾩궛
+                    # 1. 병합 세그먼트 정보 계산
                     merged, _ = self.video_editor.get_merged_segments_info(self.results_data)
                     
-                    # 2. ASS ?ㅽ????ㅻ뜑 ?뺣낫 ?섏쭛 (apply_preview_subtitles 濡쒖쭅 ?ъ궗??
-                    # --- HEX(#RRGGBB) ??ASS(&H00BBGGRR&) 蹂??---
+                    # 2. ASS 스타일/헤더 정보 수집 (apply_preview_subtitles 로직 재사용)
+                    # --- HEX(#RRGGBB) → ASS(&H00BBGGRR&) 변환 ---
                     def hex_to_ass(hex_color):
                         hex_color = hex_color.lstrip('#')
                         r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
                         return f"&H00{b:02X}{g:02X}{r:02X}&"
                     
-                    font_name = self.sub_font.get() if hasattr(self, 'sub_font') else '留묒? 怨좊뵓'
+                    font_name = self.sub_font.get() if hasattr(self, 'sub_font') else '맑은 고딕'
                     font_size = self.sub_font_size.get() if hasattr(self, 'sub_font_size') else 40
                     ass_primary = hex_to_ass(self.sub_color_f.get() if hasattr(self, 'sub_color_f') else '#ffffff')
                     ass_outline = hex_to_ass(self.sub_color_o.get() if hasattr(self, 'sub_color_o') else '#000000')
@@ -1973,8 +1949,8 @@ class CustomModelApp:
                         h, m, s, cs = int(sec//3600), int((sec%3600)//60), int(sec%60), int((sec%1)*100)
                         return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
-                    # ?꾨윭 泥섎━ 濡쒖쭅 (apply_preview_subtitles ??異붽???寃껉낵 ?숈씪)
-                    _FILLERS = {'음', '어', '아', '어어', '그', '그냥', '뭐', '막', '좀'}
+                    # 필러 처리 로직 (apply_preview_subtitles 에 추가한 것과 동일)
+                    _FILLERS = {'어', '음', '아', '으', '에', '이', '오', '우', '그', '저', '뭐', '막', '좀', '그냥'}
                     def _get_display_start(r):
                         words = r.get('words', [])
                         if not words: return r['s']
@@ -1988,14 +1964,14 @@ class CustomModelApp:
                             return ws
                         return r['s']
 
-                    # 3. ??꾨씪??留ㅽ븨 (Cut ?곸긽??留욊쾶 ?먮쭑 ?쒓컙 ?대룞)
+                    # 3. 타임라인 매핑 (Cut 영상에 맞게 자막 시간 이동)
                     lines = []
                     current_out_time = 0.0
                     for m_start, m_end in merged:
                         for r in self.results_data:
-                            # ?멸렇癒쇳듃媛 ??蹂묓빀 援ш컙 ?덉뿉 ?덈뒗吏 ?뺤씤
+                            # 세그먼트가 이 병합 구간 안에 있는지 확인
                             if r['s'] >= m_start - 0.001 and r['e'] <= m_end + 0.001:
-                                rel_s = _get_display_start(r) - m_start # ?꾨윭 蹂댁젙 ?ы븿
+                                rel_s = _get_display_start(r) - m_start # 필러 보정 포함
                                 rel_e = r['e'] - m_start
                                 s_out, e_out = current_out_time + rel_s, current_out_time + rel_e
                                 lines.append(f"Dialogue: 0,{fmt_ass_time(s_out)},{fmt_ass_time(e_out)},Default,,0,0,0,,{r['t']}")
@@ -2016,9 +1992,9 @@ class CustomModelApp:
         if save_path:
             try:
                 media_info = self.video_editor.get_media_info(self.current_video_path); real_fps = media_info.get("fps", 30.0)
-                if self.video_editor.export_premiere_xml(self.current_video_path, self.results_data, save_path, fps=real_fps): messagebox.showinfo('완료', f'XML 내보내기가 완료되었습니다.\n{save_path}')
-                else: messagebox.showerror('오류', 'XML 내보내기에 실패했습니다.')
-            except Exception as e: messagebox.showerror('오류', str(e))
+                if self.video_editor.export_premiere_xml(self.current_video_path, self.results_data, save_path, fps=real_fps): messagebox.showinfo("완료", f"XML 생성 완료:\n{save_path}")
+                else: messagebox.showerror("오류", "XML 생성 실패")
+            except Exception as e: messagebox.showerror("오류", str(e))
 
 
 
@@ -2033,11 +2009,11 @@ class CustomModelApp:
                     self._open_editor(item, x, y, max(w, 200), max(h, 20), e.x - x)
             else:
                 try:
-                    # ?쒖옉 ?쒓컙 ?대┃(#2) vs 醫낅즺 ?쒓컙 ?대┃(#3) 遺꾧린 泥섎━
+                    # 시작 시간 클릭(#2) vs 종료 시간 클릭(#3) 분기 처리
                     if col == '#3': t_sec = self.parse_time(val[2])
                     else: t_sec = self.parse_time(val[1])
                     self.player.set_time(int(t_sec * 1000))
-                except Exception as e: print(f'[WARN] ?몃━ ?대┃ ?쒓컙 ?대룞 ?ㅻ쪟: {e}')
+                except Exception as e: print(f'[WARN] 트리 클릭 시간 이동 오류: {e}')
             
     def edit_selected_text(self):
         sel = self.tree.selection()
@@ -2050,10 +2026,10 @@ class CustomModelApp:
 
 
     def rebuild_tree_and_render(self, fast=False):
-        # [?쒕땲??理쒖쟻?? Treeview 媛깆떊? 異⑸텇??鍮좊Ⅴ吏留? Canvas ?꾩껜 ?щ옖?붾쭅? 臾닿쾪?듬땲??
-        # Ctrl+??議곗젅 ?쒖뿉??fast=True瑜??섍꺼 Treeview留?媛깆떊?⑸땲??
+        # [시니어 최적화] Treeview 갱신은 충분히 빠르지만, Canvas 전체 재랜더링은 무겁습니다.
+        # Ctrl+휠 조절 시에는 fast=True를 넘겨 Treeview만 갱신합니다.
         
-        # ?꾩옱 ?좏깮???꾩씠??湲곗뼲 (?ㅽ겕濡??좎?瑜??꾪븿)
+        # 현재 선택된 아이템 기억 (스크롤 유지를 위함)
         selected_idx = -1
         sel = self.tree.selection()
         if sel:
@@ -2064,7 +2040,7 @@ class CustomModelApp:
         for i, r in enumerate(self.results_data):
             self.tree.insert("", "end", values=(i+1, self.format_time(r.get('s',0)), self.format_time(r.get('e',0)), r.get('t','')))
         
-        # ?좏깮 ?곹깭 蹂듦뎄
+        # 선택 상태 복구
         if selected_idx != -1:
             for item in self.tree.get_children():
                 if int(self.tree.item(item)['values'][0]) - 1 == selected_idx:
@@ -2072,7 +2048,7 @@ class CustomModelApp:
                     break
 
         if not fast:
-            # [?ъ슜???붿껌] ?⑥뼱 釉붾줉 ??0踰????뚮쭔 留덈쾿吏?罹붾쾭??由ы봽?덉떆 ?섑뻾 (?깅뒫 ?덉빟)
+            # [사용자 요청] 단어 블록 탭(0번)일 때만 마법진 캔버스 리프레시 수행 (성능 절약)
             if getattr(self, "notebook", None) and self.notebook.index(self.notebook.select()) == 0:
                 self.block_editor.render_block_view()
         
@@ -2090,7 +2066,7 @@ class CustomModelApp:
         entry.insert(0, text)
         entry.focus()
 
-        # [?쒕땲??理쒖쟻?? ?ъ슜?먭? ?대┃??x 醫뚰몴瑜?怨꾩궛?섏뿬 ?대떦 湲???ъ씠??而ㅼ꽌 ?뚰궧
+        # [시니어 최적화] 사용자가 클릭한 x 좌표를 계산하여 해당 글자 사이에 커서 파킹
         if click_x is not None:
             def _set_cursor():
                 idx = entry.index(f"@{max(0, click_x)}")
@@ -2099,7 +2075,7 @@ class CustomModelApp:
         else:
             entry.selection_range(0, tk.END)
 
-        # [?쒕땲??紐⑥뀡 ?몃옒?? ?ㅽ겕濡????띿뒪???낅젰李쎌씠 ?먮낯 ? ?꾩튂瑜??ㅼ떆媛꾩쑝濡??곕씪媛?꾨줉 異붿쟻
+        # [시니어 모션 트래킹] 스크롤 시 텍스트 입력창이 원본 셀 위치를 실시간으로 따라가도록 추적
         def _track_position():
             if not entry.winfo_exists(): return
             if not self.tree.exists(item):
@@ -2110,12 +2086,12 @@ class CustomModelApp:
                     nx, ny, nw, nh = bbox
                     entry.place(x=nx, y=ny, width=max(nw, 200), height=max(nh, 20))
                 else:
-                    entry.place(x=-9999, y=-9999) # ?붾㈃ 諛뽰쑝濡??ㅽ겕濡????꾩떆 ?④? 泥섎━
+                    entry.place(x=-9999, y=-9999) # 화면 밖으로 스크롤 시 임시 숨김 처리
             self.root.after(15, _track_position)
         
         _track_position()
 
-        # [?쒕땲??理쒖쟻?? ?ㅼ떆媛???댄븨 諛섏쁺 (Debounced)
+        # [시니어 최적화] 실시간 타이핑 반영 (Debounced)
         def _on_key_release(event):
             if event.keysym in ['Return', 'Escape']: return
             if hasattr(self, '_edit_debounce_timer') and self._edit_debounce_timer:
@@ -2132,7 +2108,7 @@ class CustomModelApp:
             if old_text != new_text:
                 self.transcript_manager.save_state()
                 self.results_data[target_idx]['t'] = new_text
-                # [?쒕땲??理쒖쟻?? ?띿뒪???섏젙 諛쒖깮 ??湲곗〈 ?⑥뼱 釉붾줉(諛곗뿴) ?뚯뇙瑜??듯빐 ?? 吏꾩엯 ???먮룞 遺꾪븷 ?ш퀎???좊룄
+                # [시니어 최적화] 텍스트 수정 발생 시 기존 단어 블록(배열) 파쇄를 통해 탭2 진입 시 자동 분할 재계산 유도
                 self.results_data[target_idx].pop('words', None)
                 self.apply_preview_subtitles(force_reload=True)
             
@@ -2162,18 +2138,18 @@ class CustomModelApp:
         item = self.tree.identify_row(e.y)
         if item: self.tree.selection_set(item); self.menu.post(e.x_root, e.y_root)
     def apply_preview_subtitles(self, force_reload=False):
-        """[ASS ?レ뒪?? ?ъ슜???붿옄???ㅼ젙??諛섏쁺??ASS ?뚯씪???숈쟻 ?앹꽦?섏뿬 VLC??二쇱엯"""
+        """[ASS 핫스왓] 사용자 디자인 설정을 반영한 ASS 파일을 동적 생성하여 VLC에 주입"""
         if not self.results_data or not self.player: return
         try:
-            # --- HEX(#RRGGBB) ??ASS(&H00BBGGRR&) 蹂??---
+            # --- HEX(#RRGGBB) → ASS(&H00BBGGRR&) 변환 ---
             def hex_to_ass(hex_color):
                 hex_color = hex_color.lstrip('#')
                 r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
                 return f"&H00{b:02X}{g:02X}{r:02X}&"
             
-            # --- ?ъ슜??UI ?ㅼ젙媛??섏쭛 ---
+            # --- 사용자 UI 설정값 수집 ---
             font_name = getattr(self, 'sub_font', None)
-            font_name = font_name.get() if font_name else '留묒? 怨좊뵓'
+            font_name = font_name.get() if font_name else '맑은 고딕'
             font_size = getattr(self, 'sub_font_size', None)
             font_size = font_size.get() if font_size else 40
             color_f = getattr(self, 'sub_color_f', None)
@@ -2193,7 +2169,7 @@ class CustomModelApp:
             ass_outline = hex_to_ass(color_o)
             ass_shadow = hex_to_ass(color_s)
             
-            # --- ASS ?ㅻ뜑 ?묒꽦 ---
+            # --- ASS 헤더 작성 ---
             ass_header = f"""[Script Info]
 Title: VAD AI Studio Preview
 ScriptType: v4.00+
@@ -2209,7 +2185,7 @@ Style: Default,{font_name},{font_size},{ass_primary},&H000000FF&,{ass_outline},{
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-            # --- ASS ?쒓컙 ?щ㎎ H:MM:SS.cs ---
+            # --- ASS 시간 포맷 H:MM:SS.cs ---
             def fmt_ass_time(sec):
                 h = int(sec // 3600)
                 m = int((sec % 3600) // 60)
@@ -2217,26 +2193,26 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 cs = int((sec % 1) * 100)
                 return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
             
-            _FILLERS = {'음', '어', '아', '어어', '그', '그냥', '뭐', '막', '좀'}
+            _FILLERS = {'어', '음', '아', '으', '에', '이', '오', '우', '그', '저', '뭐', '막', '좀', '그냥'}
 
             def _get_display_start(r):
-                """Return a stable display start time for preview/export."""
+                """words가 있으면 첫 실제 단어의 시작 시간을 반환, 없으면 r['s'] 그대로"""
                 words = r.get('words', [])
                 if not words:
                     return r['s']
                 for w in words:
-                    # words ??ぉ? dict ?먮뒗 dataclass ???뺥깭媛 ?쇱옱?섎?濡?????泥섎━
+                    # words 항목은 dict 또는 dataclass 두 형태가 혼재하므로 둘 다 처리
                     wt = w['word'].strip() if isinstance(w, dict) else w.word.strip()
-                    # [?쒕땲?? Whisper ?뱀쑀??臾몄옣遺??--, ...) 諛?怨듬갚 ?쒓굅
+                    # [시니어] Whisper 특유의 문장부호(--, ...) 및 공백 제거
                     wclean = wt.replace(' ', '').replace('.', '').replace(',', '').replace('-', '').replace('~', '')
                     if not wclean: continue
                     
-                    # ?꾨윭 ?⑥뼱?닿굅??1~3湲??諛섎났(?댁뼱, ?댁뼱?????대㈃ 嫄대꼫??
+                    # 필러 단어이거나 1~3글자 반복(어어, 어어어 등)이면 건너뜜
                     if wclean in _FILLERS or (len(wclean) <= 3 and len(set(wclean)) <= 1):
                         continue
                         
                     ws = w['s'] if isinstance(w, dict) else w.s
-                    # ?멸렇癒쇳듃 ?쒖옉蹂대떎 1.5珥??댁긽 ??쑝硫??먮낯 ?좎? (?덈Т ??쾶 ?⑤뒗 寃?諛⑹?)
+                    # 세그먼트 시작보다 1.5초 이상 늦으면 원본 유지 (너무 늦게 뜨는 것 방지)
                     if ws - r['s'] > 1.5:
                         return r['s']
                     return ws
@@ -2244,13 +2220,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
             lines = []
             for i, r in enumerate(self.results_data):
-                s_r = _get_display_start(r)  # ?ㅼ젣 ?⑥뼱 湲곗? ?쒖떆 ?쒖옉??
+                s_r = _get_display_start(r)  # 실제 단어 기준 표시 시작점
                 e_r = r['e']
                 if i < len(self.results_data) - 1 and e_r >= self.results_data[i+1]['s']:
                     e_r = max(s_r + 0.1, self.results_data[i+1]['s'] - 0.05)
                 lines.append(f"Dialogue: 0,{fmt_ass_time(s_r)},{fmt_ass_time(e_r)},Default,,0,0,0,,{r['t']}")
             
-            # --- A/B ?묓뎮 ?レ뒪??---
+            # --- A/B 핑퉁 핫스왓 ---
             suffix = "A" if getattr(self, '_ping_pong', False) else "B"
             self._ping_pong = not getattr(self, '_ping_pong', False)
             _script_dir = self.base_dir
@@ -2264,14 +2240,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             self.preview_srt_path = ass_name
             self.player.set_subtitle(ass_name)
             
-            # [?쒕땲??理쒖쟻?? ?쇱떆?뺤? ?곹깭?????쒖옄由??먰봽濡??꾨젅???덈줈怨좎묠
+            # [시니어 최적화] 일시정지 상태일 때 제자리 점프로 프레임 새로고침
             if force_reload and not self.player.is_playing():
                 curr = self.player.get_time()
                 if curr >= 0:
                     self.player.set_time(curr)
         except Exception as e:
             import traceback; traceback.print_exc()
-            print(f'[ERROR] apply_preview_subtitles ?ㅽ뙣: {e}')
+            print(f'[ERROR] apply_preview_subtitles 실패: {e}')
     def toggle_play(self):
         if self.player: is_p = self.player.toggle_play(); self.btn_play.config(text=self.ICON_PAUSE if is_p else self.ICON_PLAY)
     def skip_time(self, ms): 
@@ -2282,7 +2258,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if self.player:
             self.player.set_mute(True)
             if not self._was_playing_before_seek:
-                self.player.toggle_play() # 媛뺤젣 媛깆떊???꾪빐 ?ъ깮 ?쒖옉
+                self.player.toggle_play() # 강제 갱신을 위해 재생 시작
         self._update_seek_from_mouse(e)
     def on_seek_motion(self, e):
         if self.is_seeking: self._update_seek_from_mouse(e)
@@ -2291,10 +2267,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         self.is_seeking = False
         if self.player:
             if getattr(self, '_was_playing_before_seek', False):
-                self.player.play() # ?먮옒 ?ъ깮 ?곹깭??ㅻ㈃ ?ъ깮
+                self.player.play() # 원래 재생 상태였다면 재생
             else:
-                self.player.pause() # ?먮옒 ?쇱떆?뺤? ?곹깭??ㅻ㈃ ?뺤?
-            # 利됱떆 裕ㅽ듃 ?댁젣 ???뚮━媛 ?????덉뼱 ?쎄컙???쒕젅??
+                self.player.pause() # 원래 일시정지 상태였다면 정지
+            # 즉시 뮤트 해제 시 소리가 튈 수 있어 약간의 딜레이
             self.root.after(100, lambda: self.player.set_mute(False) if self.player else None)
     def _update_seek_from_mouse(self, e):
         try:
@@ -2303,7 +2279,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 pos = max(0.0, min(1.0, e.x / w))
                 self.player.set_position(pos)
                 self.seek_var.set(pos * 1000)
-        except Exception as e: print(f'[WARN] ?쒗겕諛??대룞 ?ㅻ쪟: {e}')
+        except Exception as e: print(f'[WARN] 시크바 이동 오류: {e}')
 
 
     def update_loop(self):
@@ -2314,7 +2290,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             curr_ms = self.player.get_time()
             total_ms = self.player.get_length()
             
-            # [?쒕땲??理쒖쟻?? VLC ??대㉧???댁긽???쒓퀎(??250ms) 洹밸났???꾪븳 ?뚯씠???대? 諛由ъ큹(High-Precision) ?꾨젅??蹂닿컙
+            # [시니어 최적화] VLC 타이머의 해상도 한계(약 250ms) 극복을 위한 파이썬 내부 밀리초(High-Precision) 프레임 보간
             import time
             if not hasattr(self, '_last_vlc_ms'):
                 self._last_vlc_ms = curr_ms
@@ -2335,7 +2311,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 self._refresh_overlay_time_state(curr_ms / 1000.0)
                 self._update_overlay_timeline_playhead()
                 
-                # [?ъ슜???붿껌] ?꾩옱 ?ъ깮 以묒씤 ?먮쭑 李얘린 諛?媛뺤“ (?댁젣 珥덉젙諛 ?쒓퀎 ?ъ슜)
+                # [사용자 요청] 현재 재생 중인 자막 찾기 및 강조 (이제 초정밀 시계 사용)
                 curr_sec = self._smooth_ms / 1000.0
                 active_idx = -1
                 for i, r in enumerate(self.results_data):
@@ -2346,28 +2322,63 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 if hasattr(self, '_last_active_idx') and self._last_active_idx != active_idx:
                     current_tab = self.notebook.index(self.notebook.select())
                     
-                    # Treeview 媛뺤“
+                    # Treeview 강조
                     for item in self.tree.get_children():
                         val = self.tree.item(item)['values']
                         if val and int(val[0]) - 1 == active_idx:
                             self.tree.item(item, tags=('active',))
-                            if current_tab == 1: self.tree.see(item) # ?먮쭑 由ъ뒪????씪 ?뚮쭔 ?ㅽ겕濡?
+                            if current_tab == 1: self.tree.see(item) # 자막 리스트 탭일 때만 스크롤
                         else:
                             self.tree.item(item, tags=())
                     
-                    # ?⑥뼱 釉붾줉 媛뺤“ (?ㅽ겕濡ㅼ? ?대? 硫붿꽌?쒖뿉?????뺤씤 ???섑뻾)
+                    # 단어 블록 강조 (스크롤은 내부 메서드에서 탭 확인 후 수행)
                     self.block_editor.set_active_row(active_idx, follow= (current_tab == 0))
                     self._last_active_idx = active_idx
                 elif not hasattr(self, '_last_active_idx'):
-                    self._last_active_idx = -2 # 珥덇린??
+                    self._last_active_idx = -2 # 초기화
 
                 if hasattr(self, 'block_editor'):
                     self.block_editor.set_active_time(curr_sec)
 
             if hasattr(self, 'btn_play'): self.btn_play.config(text=self.ICON_PAUSE if self.player.is_playing() else self.ICON_PLAY)
         
-        # ?ㅼ떆媛꾩꽦 ?μ긽???꾪빐 16ms 二쇨린濡?蹂寃?(珥덈떦 ~60?꾨젅??
+        # 실시간성 향상을 위해 16ms 주기로 변경 (초당 ~60프레임)
         self.root.after(16, self.update_loop)
+    def _add_sash_handle(self, paned, orient='h'):
+        """PanedWindow의 Sash 위치에 마우스 호버 시 반응하는 시각적 핸들(Pill)을 추가"""
+        C = self.C
+        # 핸들 프레임 생성 (Pill 모양 모사)
+        if orient == 'h':
+            handle = tk.Frame(paned, bg=C['border'], width=4, height=40, cursor="sb_h_double_arrow")
+        else:
+            handle = tk.Frame(paned, bg=C['border'], width=40, height=4, cursor="sb_v_double_arrow")
+        
+        def _on_enter(e): handle.config(bg=C['accent'])
+        def _on_leave(e): handle.config(bg=C['border'])
+        handle.bind("<Enter>", _on_enter)
+        handle.bind("<Leave>", _on_leave)
+        
+        # 드래그 중에도 핸들이 Sash를 따라다니도록 실시간 추적
+        def _sync_position():
+            try:
+                if not paned.winfo_exists(): return
+                # PanedWindow에 위젯이 2개 이상 추가되어 Sash가 생성된 경우에만 작동
+                # [오류 수정] tk.PanedWindow에는 count() 메서드가 없으므로 panes()의 길이로 체크
+                if len(paned.panes()) > 1:
+                    coords = paned.sash_coord(0)
+                    if orient == 'h':
+                        # 수직 핸들을 Sash 중앙에 배치
+                        ph = paned.winfo_height()
+                        handle.place(x=coords[0] + 1, y=(ph - 40) // 2)
+                    else:
+                        # 수평 핸들을 Sash 중앙에 배치
+                        pw = paned.winfo_width()
+                        handle.place(x=(pw - 40) // 2, y=coords[1] + 1)
+                self.root.after(100, _sync_position)
+            except Exception as e: print(f'[WARN] Sash 핸들 동기화 오류: {e}')
+        
+        _sync_position()
+
     def export_subtitles(self):
         if not self.results_data: return
         fmt = self.export_format.get()
@@ -2399,12 +2410,5 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     writer.writerow(["Index", "Start", "End", "Text"])
                     for i, r in enumerate(self.results_data):
                         writer.writerow([i+1, r['s'], r['e'], r['t']])
-            messagebox.showinfo('완료', '저장되었습니다.')
-
-
-
-
-
-
-
+            messagebox.showinfo("완료", "저장되었습니다.")
 

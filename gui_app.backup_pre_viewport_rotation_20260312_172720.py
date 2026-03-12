@@ -224,7 +224,7 @@ class CustomModelApp:
         
         # [?쒕땲?? ?꾨줈洹몃옩 醫낅즺 ??李뚭볼湲??뚯씪 泥?냼 ?꾨줈?좎퐳 ?깅줉
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-        self._report_startup_progress(100, '준비 완료')
+        self._report_startup_progress(100, "Ready")
 
     def on_closing(self):
         """Clean up temp files and stop background work before exit."""
@@ -293,8 +293,8 @@ class CustomModelApp:
         self.dispatcher.on("progress", lambda x: self._queue_ui(lambda: self._on_progress(x)))
         self.dispatcher.on("add_row", lambda x: self._queue_ui(lambda: self._on_add_row(x)))
         self.dispatcher.on("complete", lambda x: self._queue_ui(lambda: self._on_complete(x)))
-        self.dispatcher.on("message", lambda x: self._queue_ui(lambda: messagebox.showinfo('완료', x["text"])))
-        self.dispatcher.on("error", lambda x: self._queue_ui(lambda: messagebox.showerror('오류', x["text"])))
+        self.dispatcher.on("message", lambda x: self._queue_ui(lambda: messagebox.showinfo("Done", x["text"])))
+        self.dispatcher.on("error", lambda x: self._queue_ui(lambda: messagebox.showerror("Error", x["text"])))
         self.dispatcher.on("ghost_defense", lambda x: self._queue_ui(lambda: [self.reset_action_button(), self.btn_stop.configure(state=tk.DISABLED)]))
 
     def _on_progress(self, task):
@@ -367,7 +367,14 @@ class CustomModelApp:
         self.overlay_rotate_handle.bind('<B1-Motion>', self.on_overlay_drag)
         self.overlay_rotate_handle.bind('<ButtonRelease-1>', self.on_overlay_release)
         self.video_frame.bind('<Button-1>', lambda e: self.toggle_play())
+        
+        # [?????????? ??? ??????????? ??? ?????? ??????????? ?????
         def _on_canvas_resize(e):
+            new_w = e.width
+            if new_w > 10:
+                new_h = int(new_w * self._video_aspect)
+                if new_h > 10 and abs(new_h - self.video_frame.winfo_height()) > 5:
+                    self.video_frame.config(height=new_h)
             self.refresh_overlay_preview()
         self.video_frame.bind("<Configure>", _on_canvas_resize)
 
@@ -402,22 +409,22 @@ class CustomModelApp:
         self.notebook = ttk.Notebook(timeline_zone)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         self.tab_canvas = tk.Frame(self.notebook, bg=C['bg'])
-        self.notebook.add(self.tab_canvas, text=' 단어 블록 ')
+        self.notebook.add(self.tab_canvas, text=' ?㎥ ?⑥뼱 釉붾줉 ')
         self.tab_overlay = tk.Frame(self.notebook, bg=C['bg'])
-        self.notebook.add(self.tab_overlay, text=' 오버레이 타임라인 ')
+        self.notebook.add(self.tab_overlay, text=' Overlay Timeline ')
         
         self.tab_tree = tk.Frame(self.notebook, bg=C['bg2'])
-        self.notebook.add(self.tab_tree, text=' 자막 리스트 ')
+        self.notebook.add(self.tab_tree, text=' ?뱥 ?먮쭑 由ъ뒪??')
         
         # [?ъ슜???붿껌] ?먮쭑 ?ㅼ젙 ??蹂꾨룄 遺꾨━
         self.tab_style = tk.Frame(self.notebook, bg=C['bg'])
-        self.notebook.add(self.tab_style, text=' 자막 설정 ')
+        self.notebook.add(self.tab_style, text=' ?숋툘 ?먮쭑 ?ㅼ젙 ')
         self.notebook.select(self.tab_canvas)
         
         # ?? ?먮쭑 由ъ뒪??Treeview ?ㅼ젙 ??
         self.tree = ttk.Treeview(self.tab_tree, columns=('no','start','end','text'), show='headings')
         self.tree.tag_configure('active', background='#D0E5FF')
-        self.tree.heading('no', text='#'); self.tree.heading('start', text='시작'); self.tree.heading('end', text='종료'); self.tree.heading('text', text='대사')
+        self.tree.heading('no', text='#'); self.tree.heading('start', text='?쒖옉'); self.tree.heading('end', text='醫낅즺'); self.tree.heading('text', text='?댁슜')
         self.tree.column('no', width=34, anchor=tk.CENTER); self.tree.column('start', width=70, anchor=tk.CENTER); self.tree.column('end', width=70, anchor=tk.CENTER); self.tree.column('text', width=400)
         sc = ttk.Scrollbar(self.tab_tree, orient=tk.VERTICAL, command=self.tree.yview); self.tree.configure(yscrollcommand=sc.set)
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); sc.pack(side=tk.RIGHT, fill=tk.Y)
@@ -433,21 +440,21 @@ class CustomModelApp:
         self.notebook.bind('<<NotebookTabChanged>>', _on_tab_changed)
         overlay_toolbar = tk.Frame(self.tab_overlay, bg=C['bg'])
         overlay_toolbar.pack(fill=tk.X, padx=8, pady=(8, 4))
-        self.btn_add_image_overlay = tk.Button(overlay_toolbar, text='이미지 오버레이 추가', command=self.add_image_overlay, bg=C['bg2'], fg=C['text'], relief='flat', bd=0, padx=10, pady=6, cursor='hand2')
+        self.btn_add_image_overlay = tk.Button(overlay_toolbar, text='Add Image Overlay', command=self.add_image_overlay, bg=C['bg2'], fg=C['text'], relief='flat', bd=0, padx=10, pady=6, cursor='hand2')
         self.btn_add_image_overlay.pack(side=tk.LEFT)
-        self.btn_add_text_overlay = tk.Button(overlay_toolbar, text='텍스트 오버레이 추가', command=self.add_text_overlay, bg=C['bg2'], fg=C['text'], relief='flat', bd=0, padx=10, pady=6, cursor='hand2')
+        self.btn_add_text_overlay = tk.Button(overlay_toolbar, text='Add Text Overlay', command=self.add_text_overlay, bg=C['bg2'], fg=C['text'], relief='flat', bd=0, padx=10, pady=6, cursor='hand2')
         self.btn_add_text_overlay.pack(side=tk.LEFT, padx=(6, 0))
         self.use_subtitle_adapter_var = tk.BooleanVar(value=False)
-        self.subtitle_adapter_check = tk.Checkbutton(overlay_toolbar, text='자막 어댑터', variable=self.use_subtitle_adapter_var, command=lambda: (self.refresh_overlay_preview(), self.refresh_overlay_timeline()), bg=C['bg'], fg=C['text'], selectcolor=C['bg3'], activebackground=C['bg'], activeforeground=C['text'], relief='flat', bd=0, highlightthickness=0, font=_f)
+        self.subtitle_adapter_check = tk.Checkbutton(overlay_toolbar, text='Subtitle Adapter', variable=self.use_subtitle_adapter_var, command=lambda: (self.refresh_overlay_preview(), self.refresh_overlay_timeline()), bg=C['bg'], fg=C['text'], selectcolor=C['bg3'], activebackground=C['bg'], activeforeground=C['text'], relief='flat', bd=0, highlightthickness=0, font=_f)
         self.subtitle_adapter_check.pack(side=tk.LEFT, padx=(8, 0))
-        tk.Label(overlay_toolbar, text='배율', bg=C['bg'], fg=C['text2'], font=_f).pack(side=tk.LEFT, padx=(12, 4))
+        tk.Label(overlay_toolbar, text='?뺣?', bg=C['bg'], fg=C['text2'], font=_f).pack(side=tk.LEFT, padx=(12, 4))
         self.overlay_zoom_var = tk.StringVar(value='1x')
         self.overlay_zoom_combo = ttk.Combobox(overlay_toolbar, textvariable=self.overlay_zoom_var, state='readonly', width=6, values=('1x', '2x', '4x', '8x'))
         self.overlay_zoom_combo.pack(side=tk.LEFT)
         self.overlay_zoom_combo.bind('<<ComboboxSelected>>', lambda e: self.refresh_overlay_timeline())
-        tk.Label(overlay_toolbar, text='스냅', bg=C['bg'], fg=C['text2'], font=_f).pack(side=tk.LEFT, padx=(12, 4))
-        self.overlay_snap_var = tk.StringVar(value='0.1초')
-        self.overlay_snap_combo = ttk.Combobox(overlay_toolbar, textvariable=self.overlay_snap_var, state='readonly', width=12, values=('끄기', '0.1초', '프레임'))
+        tk.Label(overlay_toolbar, text='?ㅻ깄', bg=C['bg'], fg=C['text2'], font=_f).pack(side=tk.LEFT, padx=(12, 4))
+        self.overlay_snap_var = tk.StringVar(value='0.1s')
+        self.overlay_snap_combo = ttk.Combobox(overlay_toolbar, textvariable=self.overlay_snap_var, state='readonly', width=12, values=('off', '0.1s', 'frame'))
         self.overlay_snap_combo.pack(side=tk.LEFT)
 
         overlay_body = tk.Frame(self.tab_overlay, bg=C['bg'])
@@ -479,7 +486,7 @@ class CustomModelApp:
         self.overlay_props_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.overlay_props_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         overlay_props = self.overlay_props_inner
-        tk.Label(overlay_props, text='오버레이 속성', bg=C['bg2'], fg=C['text'], font=('Noto Sans KR', 10, 'bold')).pack(anchor='w', padx=12, pady=(12, 8))
+        tk.Label(overlay_props, text='???? ??', bg=C['bg2'], fg=C['text'], font=('Noto Sans KR', 10, 'bold')).pack(anchor='w', padx=12, pady=(12, 8))
 
         def _overlay_prop_row(parent, key, label_text):
             row = tk.Frame(parent, bg=C['bg2'])
@@ -489,40 +496,40 @@ class CustomModelApp:
             ent.pack(side=tk.RIGHT, fill=tk.X, expand=True)
             self.overlay_prop_entries[key] = ent
 
-        _overlay_prop_row(overlay_props, 'text', '텍스트')
-        _overlay_prop_row(overlay_props, 'x', 'X 위치')
-        _overlay_prop_row(overlay_props, 'y', 'Y 위치')
-        _overlay_prop_row(overlay_props, 'width', '너비')
-        _overlay_prop_row(overlay_props, 'height', '높이')
-        _overlay_prop_row(overlay_props, 'start_time', '시작 시간')
-        _overlay_prop_row(overlay_props, 'end_time', '종료 시간')
-        _overlay_prop_row(overlay_props, 'opacity', '불투명도')
-        _overlay_prop_row(overlay_props, 'font_size', '글자 크기')
-        _overlay_prop_row(overlay_props, 'text_color', '글자색')
-        _overlay_prop_row(overlay_props, 'rotation', '회전')
+        _overlay_prop_row(overlay_props, 'text', 'text')
+        _overlay_prop_row(overlay_props, 'x', 'x')
+        _overlay_prop_row(overlay_props, 'y', 'y')
+        _overlay_prop_row(overlay_props, 'width', 'width')
+        _overlay_prop_row(overlay_props, 'height', 'height')
+        _overlay_prop_row(overlay_props, 'start_time', 'start')
+        _overlay_prop_row(overlay_props, 'end_time', 'end')
+        _overlay_prop_row(overlay_props, 'opacity', 'opacity')
+        _overlay_prop_row(overlay_props, 'font_size', 'font size')
+        _overlay_prop_row(overlay_props, 'text_color', 'text color')
+        _overlay_prop_row(overlay_props, 'rotation', 'rotation')
 
-        self.overlay_visible_check = tk.Checkbutton(overlay_props, text='표시', variable=self.overlay_prop_vars['visible'], command=self.on_toggle_selected_overlay_visible, bg=C['bg2'], fg=C['text'], selectcolor=C['bg3'], activebackground=C['bg2'], activeforeground=C['text'], relief='flat', bd=0, highlightthickness=0, font=_f)
+        self.overlay_visible_check = tk.Checkbutton(overlay_props, text='Visible', variable=self.overlay_prop_vars['visible'], command=self.on_toggle_selected_overlay_visible, bg=C['bg2'], fg=C['text'], selectcolor=C['bg3'], activebackground=C['bg2'], activeforeground=C['text'], relief='flat', bd=0, highlightthickness=0, font=_f)
         self.overlay_visible_check.pack(anchor='w', padx=12, pady=(6, 4))
 
         layer_btn_row1 = tk.Frame(overlay_props, bg=C['bg2'])
         layer_btn_row1.pack(fill=tk.X, padx=12, pady=(4, 3))
-        self.btn_overlay_forward = tk.Button(layer_btn_row1, text='한 단계 앞으로', command=lambda: self.reorder_selected_overlay('forward'), bg=C['bg3'], fg=C['text'], relief='flat', bd=0, padx=8, pady=6, cursor='hand2')
+        self.btn_overlay_forward = tk.Button(layer_btn_row1, text='Bring Forward', command=lambda: self.reorder_selected_overlay('forward'), bg=C['bg3'], fg=C['text'], relief='flat', bd=0, padx=8, pady=6, cursor='hand2')
         self.btn_overlay_forward.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
-        self.btn_overlay_backward = tk.Button(layer_btn_row1, text='한 단계 뒤로', command=lambda: self.reorder_selected_overlay('backward'), bg=C['bg3'], fg=C['text'], relief='flat', bd=0, padx=8, pady=6, cursor='hand2')
+        self.btn_overlay_backward = tk.Button(layer_btn_row1, text='Send Backward', command=lambda: self.reorder_selected_overlay('backward'), bg=C['bg3'], fg=C['text'], relief='flat', bd=0, padx=8, pady=6, cursor='hand2')
         self.btn_overlay_backward.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(3, 0))
 
         layer_btn_row2 = tk.Frame(overlay_props, bg=C['bg2'])
         layer_btn_row2.pack(fill=tk.X, padx=12, pady=(0, 6))
-        self.btn_overlay_front = tk.Button(layer_btn_row2, text='맨 앞으로', command=lambda: self.reorder_selected_overlay('front'), bg=C['bg3'], fg=C['text'], relief='flat', bd=0, padx=8, pady=6, cursor='hand2')
+        self.btn_overlay_front = tk.Button(layer_btn_row2, text='Bring to Front', command=lambda: self.reorder_selected_overlay('front'), bg=C['bg3'], fg=C['text'], relief='flat', bd=0, padx=8, pady=6, cursor='hand2')
         self.btn_overlay_front.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
-        self.btn_overlay_back = tk.Button(layer_btn_row2, text='맨 뒤로', command=lambda: self.reorder_selected_overlay('back'), bg=C['bg3'], fg=C['text'], relief='flat', bd=0, padx=8, pady=6, cursor='hand2')
+        self.btn_overlay_back = tk.Button(layer_btn_row2, text='Send to Back', command=lambda: self.reorder_selected_overlay('back'), bg=C['bg3'], fg=C['text'], relief='flat', bd=0, padx=8, pady=6, cursor='hand2')
         self.btn_overlay_back.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(3, 0))
 
-        self.btn_apply_overlay_props = tk.Button(overlay_props, text='속성 적용', command=self.apply_selected_overlay_properties, bg=C['accent'], fg='white', relief='flat', bd=0, padx=10, pady=6, cursor='hand2')
+        self.btn_apply_overlay_props = tk.Button(overlay_props, text='Apply Properties', command=self.apply_selected_overlay_properties, bg=C['accent'], fg='white', relief='flat', bd=0, padx=10, pady=6, cursor='hand2')
         self.btn_apply_overlay_props.pack(fill=tk.X, padx=12, pady=(6, 6))
-        self.btn_delete_overlay = tk.Button(overlay_props, text='선택 오버레이 삭제', command=self.delete_selected_overlay, bg=C['red'], fg='white', relief='flat', bd=0, padx=10, pady=6, cursor='hand2')
+        self.btn_delete_overlay = tk.Button(overlay_props, text='Delete Overlay', command=self.delete_selected_overlay, bg=C['red'], fg='white', relief='flat', bd=0, padx=10, pady=6, cursor='hand2')
         self.btn_delete_overlay.pack(fill=tk.X, padx=12, pady=(0, 6))
-        self.lbl_overlay_props = tk.Label(overlay_props, text='선택된 오버레이가 없습니다', bg=C['bg2'], fg=C['text2'], anchor='w', justify=tk.LEFT, font=_f)
+        self.lbl_overlay_props = tk.Label(overlay_props, text='No overlay selected', bg=C['bg2'], fg=C['text2'], anchor='w', justify=tk.LEFT, font=_f)
         self.lbl_overlay_props.pack(fill=tk.X, padx=12, pady=(0, 12))
         self.root.bind_all('<MouseWheel>', self._on_overlay_props_mousewheel, add='+')
         self.root.bind_all('<Button-4>', self._on_overlay_props_mousewheel, add='+')
@@ -603,17 +610,17 @@ class CustomModelApp:
         def _check_mode(*_):
             mode = self.mode_var.get()
             if mode in ['Speech + Cut Edit', 'Auto Chapter Split (CLIP)']:
-                messagebox.showinfo('안내', '이 모드는 아직 준비되지 않았습니다.')
+                messagebox.showinfo('Notice', 'This mode is not ready yet.')
                 self.mode_var.set('Speech to Text')
             self.reset_action_button()
 
         self.mode_var.trace_add('write', _check_mode)
-        self.btn_analyze = _ctk_button(c2, '분석 시작', self.on_start_analysis, kind='primary', height=44)
+        self.btn_analyze = _ctk_button(c2, 'Start Analysis', self.on_start_analysis, kind='primary', height=44)
         self.btn_analyze.pack(fill=tk.X, padx=16, pady=(0, 6))
-        self.btn_stop = _ctk_button(c2, '작업 중지', self.on_stop_action, kind='danger', height=38)
+        self.btn_stop = _ctk_button(c2, 'Stop Task', self.on_stop_action, kind='danger', height=38)
         self.btn_stop.pack(fill=tk.X, padx=16)
         self.btn_stop.configure(state=tk.DISABLED)
-        self.lbl_status = LblMarquee(c2, text='준비 완료', fg=C['green'], bg=C['bg2'], font=_f)
+        self.lbl_status = LblMarquee(c2, text='Ready', fg=C['green'], bg=C['bg2'], font=_f)
         self.lbl_status.pack(fill=tk.X, padx=16, pady=(8, 0))
         self.progress_var = tk.DoubleVar()
         ttk.Progressbar(c2, variable=self.progress_var).pack(fill=tk.X, padx=16, pady=(6, 0))
@@ -650,7 +657,7 @@ class CustomModelApp:
 
         def _check_whisperx(*_):
             if self.use_whisperx_var.get():
-                messagebox.showinfo('안내', 'WhisperX는 아직 지원되지 않습니다.')
+                messagebox.showinfo('Notice', 'WhisperX is not supported yet.')
                 self.use_whisperx_var.set(False)
 
         self.use_whisperx_var.trace_add('write', _check_whisperx)
@@ -951,7 +958,7 @@ class CustomModelApp:
 
     def reset_action_button(self):
         self.save_frame.pack_forget()
-        self.btn_analyze.configure(text='분석 시작', command=self.on_start_analysis, state=tk.NORMAL)
+        self.btn_analyze.configure(text='Start Analysis', command=self.on_start_analysis, state=tk.NORMAL)
         self.btn_fast_save.configure(state=tk.NORMAL)
         self.btn_pro_save.configure(state=tk.NORMAL)
 
@@ -1070,7 +1077,7 @@ class CustomModelApp:
                     var.set(False)
                 else:
                     var.set('')
-            self.lbl_overlay_props.config(text='선택된 오버레이가 없습니다')
+            self.lbl_overlay_props.config(text='No overlay selected')
             for ent in self.overlay_prop_entries.values():
                 ent.configure(state=tk.DISABLED)
             for btn in [self.btn_apply_overlay_props, self.btn_overlay_forward, self.btn_overlay_backward, self.btn_overlay_front, self.btn_overlay_back, self.overlay_visible_check]:
@@ -1092,9 +1099,9 @@ class CustomModelApp:
         for key, value in values.items():
             self.overlay_prop_vars[key].set(value)
         self.overlay_prop_vars['visible'].set(bool(selected.visible))
-        vis_text = '켜짐' if selected.visible else '꺼짐'
+        vis_text = 'On' if selected.visible else 'Off'
         name = selected.text if selected.type == 'text' else os.path.basename(selected.source or selected.id)
-        self.lbl_overlay_props.config(text=f'선택: {name}\n유형: {selected.type}\n레이어: {selected.layer_index}\n표시: {vis_text}')
+        self.lbl_overlay_props.config(text=f'Selected: {name}\nType: {selected.type}\nLayer: {selected.layer_index}\nVisible: {vis_text}')
         for key, ent in self.overlay_prop_entries.items():
             if key in ('text', 'font_size', 'text_color') and selected.type != 'text':
                 ent.configure(state=tk.DISABLED)
@@ -1147,7 +1154,7 @@ class CustomModelApp:
                     raise ValueError
                 selected.text_color = color
         except ValueError:
-            messagebox.showerror('오류', '오버레이 속성은 올바른 숫자여야 합니다.')
+            messagebox.showerror('Error', 'Overlay properties must be valid numbers.')
             return
         self._invalidate_overlay_preview_cache(selected.id)
         self.refresh_overlay_preview()
@@ -1193,27 +1200,9 @@ class CustomModelApp:
             self.refresh_overlay_timeline()
             self.refresh_overlay_property_panel()
 
-    def _get_video_viewport_rect(self):
-        frame_w = max(1, self.video_frame.winfo_width())
-        frame_h = max(1, self.video_frame.winfo_height())
-        render_w = max(1, int(getattr(self.overlay_manager, 'render_width', 1920) or 1920))
-        render_h = max(1, int(getattr(self.overlay_manager, 'render_height', 1080) or 1080))
-        frame_ratio = frame_w / frame_h
-        render_ratio = render_w / render_h
-        if frame_ratio > render_ratio:
-            viewport_h = frame_h
-            viewport_w = int(round(viewport_h * render_ratio))
-            viewport_x = (frame_w - viewport_w) // 2
-            viewport_y = 0
-        else:
-            viewport_w = frame_w
-            viewport_h = int(round(viewport_w / render_ratio))
-            viewport_x = 0
-            viewport_y = (frame_h - viewport_h) // 2
-        return viewport_x, viewport_y, max(1, viewport_w), max(1, viewport_h)
-
     def _get_overlay_preview_size(self):
-        _, _, w, h = self._get_video_viewport_rect()
+        w = max(1, self.video_frame.winfo_width())
+        h = max(1, self.video_frame.winfo_height())
         return w, h
 
     def _get_overlay_cache_key(self, item_id, width, height):
@@ -1268,11 +1257,13 @@ class CustomModelApp:
             img = src.resize((width, height), resample)
             rotation = float(getattr(item, 'rotation', 0.0) or 0.0)
             if abs(rotation) > 0.01:
-                img = img.rotate(-rotation, expand=True, resample=Image.BICUBIC if not draft else Image.BILINEAR, fillcolor=(0, 0, 0, 0))
-            opacity = max(0.0, min(1.0, float(getattr(item, 'opacity', 1.0) or 1.0)))
-            if opacity < 0.999:
-                alpha = img.getchannel('A').point(lambda value: int(value * opacity))
-                img.putalpha(alpha)
+                rotated = img.rotate(-rotation, expand=True, resample=Image.BICUBIC if not draft else Image.BILINEAR, fillcolor=(0, 0, 0, 0))
+                fitted = ImageOps.contain(rotated, (width, height), Image.BICUBIC if not draft else Image.BILINEAR)
+                canvas_img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+                px = (width - fitted.width) // 2
+                py = (height - fitted.height) // 2
+                canvas_img.alpha_composite(fitted, (px, py))
+                img = canvas_img
             return img
         if item.type in ('text', 'subtitle'):
             img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
@@ -1296,7 +1287,6 @@ class CustomModelApp:
         return photo
 
     def _update_overlay_label(self, item, preview_w, preview_h, draft=False):
-        viewport_x, viewport_y, _, _ = self._get_video_viewport_rect()
         x, y, w, h = self.overlay_manager.preview_rect(item, preview_w, preview_h)
         photo = self._load_overlay_photo(item, w, h, draft=draft)
         if photo is None:
@@ -1310,22 +1300,13 @@ class CustomModelApp:
             label.bind('<ButtonRelease-1>', self.on_overlay_release)
             self._overlay_label_refs[item.id] = label
         if item.id == self.overlay_manager.selected_item_id:
-            if item.type == 'image':
-                label.configure(image=photo, highlightthickness=0, bd=0, relief='flat')
-            else:
-                label.configure(image=photo, highlightthickness=2, highlightbackground='#007AFF', highlightcolor='#007AFF', bd=1, relief='solid')
+            label.configure(image=photo, highlightthickness=2, highlightbackground='#007AFF', highlightcolor='#007AFF', bd=1, relief='solid')
         else:
             label.configure(image=photo, highlightthickness=0, bd=0, relief='flat')
         label.image = photo
-        display_w = max(1, int(photo.width()))
-        display_h = max(1, int(photo.height()))
-        center_x = viewport_x + x + (w / 2.0)
-        center_y = viewport_y + y + (h / 2.0)
-        label_x = int(round(center_x - (display_w / 2.0)))
-        label_y = int(round(center_y - (display_h / 2.0)))
-        label.place(x=label_x, y=label_y, width=display_w, height=display_h)
+        label.place(x=int(x), y=int(y), width=max(1, int(w)), height=max(1, int(h)))
         label.lift()
-        return (label_x, label_y, display_w, display_h)
+        return (int(x), int(y), max(1, int(w)), max(1, int(h)))
 
     def _position_overlay_handle(self, rect):
         selected = self._get_any_overlay_item(self.overlay_manager.selected_item_id)
@@ -1334,9 +1315,7 @@ class CustomModelApp:
             self.overlay_resize_handle.place(x=max(0, x + w - 10), y=max(0, y + h - 10), width=10, height=10)
             self.overlay_resize_handle.lift()
             if selected is not None and selected.type == 'image':
-                handle_x = max(0, x + w + 6)
-                handle_y = max(12, y - 6)
-                self.overlay_rotate_handle.place(x=handle_x, y=handle_y, width=12, height=12, anchor='sw')
+                self.overlay_rotate_handle.place(x=max(0, x + w + 6), y=max(0, y + h + 6), width=12, height=12)
                 self.overlay_rotate_handle.lift()
             else:
                 self.overlay_rotate_handle.place_forget()
@@ -1478,10 +1457,10 @@ class CustomModelApp:
 
     def _get_timeline_snap_seconds(self):
         mode = getattr(self, 'overlay_snap_var', None)
-        mode = mode.get() if mode else '끄기'
-        if mode == '0.1초':
+        mode = mode.get() if mode else 'off'
+        if mode == '0.1s':
             return 0.1
-        if mode == '프레임':
+        if mode == 'frame':
             fps = float(getattr(self, '_timeline_fps', 30.0) or 30.0)
             return 1.0 / max(1.0, fps)
         return None
@@ -1561,7 +1540,7 @@ class CustomModelApp:
         track_specs = [(idx, track.name, sorted(track.items, key=lambda ov: (ov.layer_index, ov.id))) for idx, track in enumerate(self.overlay_manager.tracks)]
         subtitle_items = self._get_subtitle_adapter_items()
         if subtitle_items:
-            track_specs.append((len(track_specs), '자막 어댑터', subtitle_items))
+            track_specs.append((len(track_specs), 'Subtitle Adapter', subtitle_items))
         self._draw_overlay_timeline_ruler(total_duration, width, ruler_h)
         for track_idx, track_name, track_items in track_specs:
             y1 = top_pad + ruler_h + track_idx * row_h
@@ -1830,21 +1809,26 @@ class CustomModelApp:
                 def _resize():
                     w, h = self.player.get_video_resolution()
                     if w > 0 and h > 0:
-                        self._video_aspect = h / w
-                        self.overlay_manager.render_width = w
-                        self.overlay_manager.render_height = h
-                        self.refresh_overlay_preview()
+                        self._video_aspect = h / w  # ?곸긽 鍮꾩쑉 ???
+                        cw = self.video_canvas.winfo_width()
+                        if cw < 10: cw = 500
+                        new_h = int(cw * self._video_aspect)
+                        if new_h > 10:
+                            self.video_frame.config(height=new_h)
+                            self.overlay_manager.render_width = w
+                            self.overlay_manager.render_height = h
+                            self.refresh_overlay_preview()
                     self.video_canvas.pack_propagate(False)
                 self.root.after(500, _resize)
                 
-                self.lbl_status.config(text='영상 로드됨: ' + os.path.basename(p), fg=self.C['accent'])
+                self.lbl_status.config(text="?곸긽 濡쒕뱶?? " + os.path.basename(p), fg=self.C['accent'])
                 self.reset_action_button()
                 
                 if hasattr(self, 'preview_srt_path') and getattr(self, 'preview_srt_path') and os.path.exists(self.preview_srt_path):
                     self.root.after(300, self.apply_preview_subtitles)
             else:
                 from tkinter import messagebox
-                messagebox.showerror('오류', '영상을 먼저 불러와 주세요.')
+                messagebox.showerror("Error", "?곸긽??遺덈윭?????놁뒿?덈떎.")
 
 
     def on_stop_action(self):
@@ -2016,9 +2000,9 @@ class CustomModelApp:
         if save_path:
             try:
                 media_info = self.video_editor.get_media_info(self.current_video_path); real_fps = media_info.get("fps", 30.0)
-                if self.video_editor.export_premiere_xml(self.current_video_path, self.results_data, save_path, fps=real_fps): messagebox.showinfo('완료', f'XML 내보내기가 완료되었습니다.\n{save_path}')
-                else: messagebox.showerror('오류', 'XML 내보내기에 실패했습니다.')
-            except Exception as e: messagebox.showerror('오류', str(e))
+                if self.video_editor.export_premiere_xml(self.current_video_path, self.results_data, save_path, fps=real_fps): messagebox.showinfo("?꾨즺", f"XML ?앹꽦 ?꾨즺:\n{save_path}")
+                else: messagebox.showerror("?ㅻ쪟", "XML ?앹꽦 ?ㅽ뙣")
+            except Exception as e: messagebox.showerror("?ㅻ쪟", str(e))
 
 
 
@@ -2399,7 +2383,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     writer.writerow(["Index", "Start", "End", "Text"])
                     for i, r in enumerate(self.results_data):
                         writer.writerow([i+1, r['s'], r['e'], r['t']])
-            messagebox.showinfo('완료', '저장되었습니다.')
+            messagebox.showinfo("?꾨즺", "??λ릺?덉뒿?덈떎.")
 
 
 
