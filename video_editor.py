@@ -4,6 +4,8 @@ import time
 import re
 import imageio_ffmpeg
 from typing import List, Dict, Tuple, Optional, Callable
+from PIL import Image
+from text_overlay_utils import render_text_overlay_image
 
 class VideoEditor:
     """비디오 편집 엔진 (Match Source, Stream Copy 및 프리미어/리졸브 완벽 호환 XML 지원)"""
@@ -29,6 +31,119 @@ class VideoEditor:
                 curr_s, curr_e = next_seg['s'], next_seg['e']
         merged.append((curr_s, curr_e)); total_duration += (curr_e - curr_s)
         return merged, total_duration
+
+    @staticmethod
+    def _map_time_intervals_to_output(merged: List[Tuple[float, float]], start_time: float, end_time: float) -> List[Tuple[float, float]]:
+        intervals: List[Tuple[float, float]] = []
+        current_out = 0.0
+        for seg_start, seg_end in merged:
+            overlap_start = max(start_time, seg_start)
+            overlap_end = min(end_time, seg_end)
+            if overlap_end > overlap_start:
+                out_start = current_out + (overlap_start - seg_start)
+                out_end = current_out + (overlap_end - seg_start)
+                intervals.append((out_start, out_end))
+            current_out += (seg_end - seg_start)
+        return intervals
+
+    @staticmethod
+    def _build_enable_expr(intervals: List[Tuple[float, float]]) -> str:
+        exprs = [f"between(t,{start:.3f},{end:.3f})" for start, end in intervals if end > start]
+        return "+".join(exprs) if exprs else "0"
+
+    def _render_text_overlay_image(self, ov: Dict, temp_dir: str, idx: int) -> Optional[str]:
+        text_value = str(ov.get('text', '') or '')
+        if not text_value:
+            return None
+        width = max(1, int(float(ov.get('width', 1))))
+        height = max(1, int(float(ov.get('height', 1))))
+        img, _ = render_text_overlay_image(
+            text=text_value,
+            width=width,
+            height=height,
+            font_size=float(ov.get('font_size', 48)),
+            text_color=str(ov.get('text_color', '#FFFFFF')),
+            opacity=float(ov.get('opacity', 1.0)),
+            text_align=str(ov.get('text_align', 'left')),
+        )
+        out_path = os.path.join(temp_dir, f'text_overlay_{idx}.png')
+        img.save(out_path)
+        return out_path
+
+    def _render_rotated_image_overlay(self, ov: Dict, temp_dir: str, idx: int) -> Tuple[Optional[str], Optional[Dict]]:
+        source = ov.get('source')
+        if not source or not os.path.exists(source):
+            return None, None
+        width = max(1, int(float(ov.get('width', 1))))
+        height = max(1, int(float(ov.get('height', 1))))
+        rotation = float(ov.get('rotation', 0.0) or 0.0)
+        if abs(rotation) <= 0.01:
+            return source, {
+                'x': int(float(ov.get('x', 0))),
+                'y': int(float(ov.get('y', 0))),
+                'width': width,
+                'height': height,
+            }
+        img = Image.open(source).convert('RGBA').resize((width, height), Image.LANCZOS)
+        rotated = img.rotate(-rotation, expand=True, resample=Image.BICUBIC, fillcolor=(0, 0, 0, 0))
+        out_path = os.path.join(temp_dir, f'image_overlay_{idx}.png')
+        rotated.save(out_path)
+        adj = {
+            'x': int(round(float(ov.get('x', 0)) - (rotated.width - width) / 2.0)),
+            'y': int(round(float(ov.get('y', 0)) - (rotated.height - height) / 2.0)),
+            'width': rotated.width,
+            'height': rotated.height,
+        }
+        return out_path, adj
+
+    def _normalize_overlays(self, overlays: Optional[List[Dict]], merged: List[Tuple[float, float]]) -> Tuple[List[Dict], List[str]]:
+        normalized: List[Dict] = []
+        temp_paths: List[str] = []
+        if not overlays:
+            return normalized, temp_paths
+        temp_dir = os.path.join(self.base_dir, f'temp_overlay_assets_{int(time.time())}')
+        os.makedirs(temp_dir, exist_ok=True)
+        for idx, ov in enumerate(overlays):
+            intervals = self._map_time_intervals_to_output(merged, float(ov.get('start_time', 0.0)), float(ov.get('end_time', 0.0)))
+            if not intervals:
+                continue
+            ov_type = ov.get('type', 'image')
+            source = None
+            overlay_x = int(float(ov.get('x', 0)))
+            overlay_y = int(float(ov.get('y', 0)))
+            overlay_w = max(1, int(float(ov.get('width', 1))))
+            overlay_h = max(1, int(float(ov.get('height', 1))))
+            if ov_type == 'image':
+                source, rotated_meta = self._render_rotated_image_overlay(ov, temp_dir, idx)
+                if not source or not rotated_meta or not os.path.exists(source):
+                    continue
+                if source.startswith(temp_dir):
+                    temp_paths.append(source)
+                overlay_x = rotated_meta['x']
+                overlay_y = rotated_meta['y']
+                overlay_w = rotated_meta['width']
+                overlay_h = rotated_meta['height']
+            elif ov_type in ('text', 'subtitle'):
+                source = self._render_text_overlay_image(ov, temp_dir, idx)
+                if not source or not os.path.exists(source):
+                    continue
+                temp_paths.append(source)
+            else:
+                continue
+            normalized.append({
+                'type': ov_type,
+                'source': source,
+                'x': overlay_x,
+                'y': overlay_y,
+                'width': overlay_w,
+                'height': overlay_h,
+                'enable': self._build_enable_expr(intervals),
+                'opacity': float(ov.get('opacity', 1.0)),
+                'track_index': int(ov.get('track_index', 0)),
+                'layer_index': int(ov.get('layer_index', 0)),
+            })
+        normalized.sort(key=lambda ov: (ov.get('track_index', 0), ov.get('layer_index', 0)))
+        return normalized, temp_paths
 
     def get_media_info(self, video_path: str) -> Dict:
         """[시니어 리팩토링] ffprobe JSON 모드를 사용하여 견고하게 메타데이터 추출"""
@@ -166,12 +281,15 @@ class VideoEditor:
             print(f"XML Export Error: {e}"); return False
 
     def cut_silence(self, input_video, output_video, segments, stop_event=None, progress_callback=None,
-                    v_codec="h264", a_codec="aac", v_bitrate="5000k", a_bitrate="128k", fast_mode=True, burn_ass: str = None) -> bool:
+                    v_codec="h264", a_codec="aac", v_bitrate="5000k", a_bitrate="128k", fast_mode=True, burn_ass: str = None, overlays: Optional[List[Dict]] = None, image_overlays: Optional[List[Dict]] = None) -> bool:
         merged, total_out_duration = self.get_merged_segments_info(segments)
         if not merged or total_out_duration <= 0: return False
 
-        # 자막을 입히려면 반드시 재인코딩이 필요하므로 fast_mode를 강제로 해제함
-        if burn_ass: fast_mode = False
+        raw_overlays = overlays if overlays is not None else image_overlays
+        normalized_overlays, temp_overlay_paths = self._normalize_overlays(raw_overlays, merged)
+
+        # ??????????? ?????????????????????fast_mode????????????
+        if burn_ass or normalized_overlays: fast_mode = False
 
         if fast_mode:
             unique_id = int(time.time())
@@ -179,17 +297,15 @@ class VideoEditor:
             os.makedirs(temp_dir, exist_ok=True)
             list_file_path = os.path.join(temp_dir, "concat.txt")
             try:
-                # [Fast Mode] FFmpeg concat demuxer 방식 (inpoint, outpoint 사용으로 키프레임 손상 방지)
                 abs_input = os.path.abspath(input_video).replace('\\', '/')
                 with open(list_file_path, "w", encoding="utf-8") as f:
                     for start, end in merged:
                         if stop_event and stop_event.is_set(): return False
                         s_adj, e_adj = max(0, start - 0.05), end + 0.05
-                        # concat demuxer format: file, inpoint, outpoint
                         f.write(f"file '{abs_input}'\n")
                         f.write(f"inpoint {s_adj}\n")
                         f.write(f"outpoint {e_adj}\n")
-                
+
                 cmd_concat = [
                     self.ffmpeg_path, "-y",
                     "-f", "concat", "-safe", "0", "-i", list_file_path,
@@ -211,32 +327,49 @@ class VideoEditor:
                 v_filters.append(f"[0:v]trim=start={s_adj}:end={e_adj},setpts=PTS-STARTPTS[v{i}]")
                 a_filters.append(f"[0:a]atrim=start={s_adj}:end={e_adj},asetpts=PTS-STARTPTS[a{i}]")
                 concat_input += f"[v{i}][a{i}]"
-            
-            filter_complex = "; ".join(v_filters + a_filters) + f"; {concat_input}concat=n={len(merged)}:v=1:a=1[v_concat][outa]"
-            
-            # 자막 필터 추가: [v_concat]subtitles=ass_path[outv]
+
+            filter_parts = v_filters + a_filters
+            filter_parts.append(f"{concat_input}concat=n={len(merged)}:v=1:a=1[v_concat][outa]")
+
+            current_video_label = '[v_concat]'
             if burn_ass:
-                # FFmpeg subtitles 필터 경로 이스케이프 (Windows 콜론 및 역슬래시 처리)
                 clean_path = os.path.abspath(burn_ass).replace('\\', '/').replace(':', '\\:')
-                filter_complex += f"; [v_concat]subtitles='{clean_path}'[outv]"
-            else:
-                filter_complex += "; [v_concat]null[outv]"
-            
+                filter_parts.append(f"{current_video_label}subtitles='{clean_path}'[v_subbed]")
+                current_video_label = '[v_subbed]'
+
+            extra_inputs = []
+            for idx, ov in enumerate(normalized_overlays, start=1):
+                extra_inputs.extend(['-loop', '1', '-i', ov['source']])
+                scaled_label = f'[ov{idx}_prep]'
+                if ov.get('opacity', 1.0) < 0.999:
+                    alpha = max(0.0, min(1.0, ov['opacity']))
+                    filter_parts.append(f"[{idx}:v]scale={ov['width']}:{ov['height']},format=rgba,colorchannelmixer=aa={alpha:.3f}{scaled_label}")
+                else:
+                    filter_parts.append(f"[{idx}:v]scale={ov['width']}:{ov['height']},format=rgba{scaled_label}")
+                out_label = '[outv]' if idx == len(normalized_overlays) else f'[v_ovl_{idx}]'
+                filter_parts.append(f"{current_video_label}{scaled_label}overlay=x={max(0, ov['x'])}:y={max(0, ov['y'])}:enable='{ov['enable']}':eof_action=pass:shortest=1{out_label}")
+                current_video_label = out_label
+
+            if not burn_ass and not normalized_overlays:
+                filter_parts.append(f"{current_video_label}null[outv]")
+            elif current_video_label != '[outv]':
+                filter_parts.append(f"{current_video_label}null[outv]")
+
+            filter_complex = '; '.join(filter_parts)
             script_path = os.path.join(self.base_dir, f"temp_filter_{int(time.time())}.txt")
             with open(script_path, "w", encoding="utf-8") as f: f.write(filter_complex)
             v_map = {"h264": "libx264", "h265": "libx265", "hevc": "libx265", "av1": "libsvtav1", "vp9": "libvpx-vp9"}
             a_map = {"aac": "aac", "mp3": "libmp3lame", "opus": "libopus", "flac": "flac"}
             v_codec_name = v_map.get(v_codec.lower(), "libx264")
             a_codec_name = a_map.get(a_codec.lower(), "aac")
-            
-            cmd = [
-                self.ffmpeg_path, "-y", "-i", input_video,
+
+            cmd = [self.ffmpeg_path, "-y", "-i", input_video] + extra_inputs + [
                 "-filter_complex_script", script_path,
                 "-map", "[outv]", "-map", "[outa]",
                 "-c:v", v_codec_name,
-                "-pix_fmt", "yuv420p",        # 색상 포맷 통일
-                "-vsync", "1",                # 프레임 싱크 고정
-                "-avoid_negative_ts", "make_zero", # 타임스탬프 리셋
+                "-pix_fmt", "yuv420p",
+                "-vsync", "1",
+                "-avoid_negative_ts", "make_zero",
                 "-b:v", v_bitrate,
                 "-preset", "faster",
                 "-threads", str(self.threads),
@@ -244,9 +377,21 @@ class VideoEditor:
                 "-b:a", a_bitrate,
                 output_video
             ]
-            try: return self._execute_ffmpeg(cmd, total_out_duration, stop_event, progress_callback)
+            try:
+                return self._execute_ffmpeg(cmd, total_out_duration, stop_event, progress_callback)
             finally:
                 if os.path.exists(script_path): os.remove(script_path)
+                for path in temp_overlay_paths:
+                    if os.path.exists(path):
+                        os.remove(path)
+                temp_dir = None
+                if temp_overlay_paths:
+                    temp_dir = os.path.dirname(temp_overlay_paths[0])
+                if temp_dir and os.path.isdir(temp_dir):
+                    try:
+                        os.rmdir(temp_dir)
+                    except OSError:
+                        pass
 
     def _execute_ffmpeg(self, cmd, total_duration, stop_event, progress_callback):
         try:

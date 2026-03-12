@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sys
 import threading
 import time
@@ -440,31 +440,20 @@ class CustomModelApp:
         self.use_subtitle_adapter_var = tk.BooleanVar(value=False)
         self.subtitle_adapter_check = tk.Checkbutton(overlay_toolbar, text='Subtitle Adapter', variable=self.use_subtitle_adapter_var, command=lambda: (self.refresh_overlay_preview(), self.refresh_overlay_timeline()), bg=C['bg'], fg=C['text'], selectcolor=C['bg3'], activebackground=C['bg'], activeforeground=C['text'], relief='flat', bd=0, highlightthickness=0, font=_f)
         self.subtitle_adapter_check.pack(side=tk.LEFT, padx=(8, 0))
-        tk.Label(overlay_toolbar, text='확대', bg=C['bg'], fg=C['text2'], font=_f).pack(side=tk.LEFT, padx=(12, 4))
-        self.overlay_zoom_var = tk.StringVar(value='1x')
-        self.overlay_zoom_combo = ttk.Combobox(overlay_toolbar, textvariable=self.overlay_zoom_var, state='readonly', width=6, values=('1x', '2x', '4x', '8x'))
-        self.overlay_zoom_combo.pack(side=tk.LEFT)
-        self.overlay_zoom_combo.bind('<<ComboboxSelected>>', lambda e: self.refresh_overlay_timeline())
-        tk.Label(overlay_toolbar, text='스냅', bg=C['bg'], fg=C['text2'], font=_f).pack(side=tk.LEFT, padx=(12, 4))
+        tk.Label(overlay_toolbar, text='Snap', bg=C['bg'], fg=C['text2'], font=_f).pack(side=tk.LEFT, padx=(12, 4))
         self.overlay_snap_var = tk.StringVar(value='0.1s')
-        self.overlay_snap_combo = ttk.Combobox(overlay_toolbar, textvariable=self.overlay_snap_var, state='readonly', width=12, values=('off', '0.1s', 'frame'))
+        self.overlay_snap_combo = ttk.Combobox(overlay_toolbar, textvariable=self.overlay_snap_var, state='readonly', width=8, values=('off', '0.1s', 'frame'))
         self.overlay_snap_combo.pack(side=tk.LEFT)
 
         overlay_body = tk.Frame(self.tab_overlay, bg=C['bg'])
         overlay_body.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
 
-        overlay_timeline_wrap = tk.Frame(overlay_body, bg=C['bg'])
-        overlay_timeline_wrap.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.overlay_timeline_canvas = tk.Canvas(overlay_timeline_wrap, bg=C['bg2'], highlightthickness=0)
-        self.overlay_timeline_canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-        self.overlay_timeline_hscroll = ttk.Scrollbar(overlay_timeline_wrap, orient=tk.HORIZONTAL, command=self.overlay_timeline_canvas.xview)
-        self.overlay_timeline_hscroll.pack(side=tk.BOTTOM, fill=tk.X)
-        self.overlay_timeline_canvas.configure(xscrollcommand=self.overlay_timeline_hscroll.set)
+        self.overlay_timeline_canvas = tk.Canvas(overlay_body, bg=C['bg2'], highlightthickness=0)
+        self.overlay_timeline_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.overlay_timeline_canvas.bind('<Button-1>', self.on_overlay_timeline_press)
         self.overlay_timeline_canvas.bind('<B1-Motion>', self.on_overlay_timeline_drag)
         self.overlay_timeline_canvas.bind('<ButtonRelease-1>', self.on_overlay_timeline_release)
         self._overlay_timeline_playhead = None
-        self._overlay_timeline_cycle = {'key': None, 'index': 0, 'items': []}
 
         overlay_props = tk.Frame(overlay_body, bg=C['bg2'], width=250)
         overlay_props.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))
@@ -995,61 +984,8 @@ class CustomModelApp:
         except Exception:
             return ''
 
-    def _get_subtitle_adapter_items(self):
-        if not getattr(self, 'use_subtitle_adapter_var', None) or not self.use_subtitle_adapter_var.get():
-            return []
-        if not self.results_data:
-            return []
-        font_size = self.sub_font_size.get() if hasattr(self, 'sub_font_size') else 40
-        text_color = self.sub_color_f.get() if hasattr(self, 'sub_color_f') else '#FFFFFF'
-        margin_v = self.sub_y_pos.get() if hasattr(self, 'sub_y_pos') else 50
-        return build_subtitle_overlays(
-            self.results_data,
-            self.overlay_manager.render_width,
-            self.overlay_manager.render_height,
-            font_size=float(font_size),
-            text_color=str(text_color),
-            margin_v=int(margin_v),
-            track_index=max(1, len(self.overlay_manager.tracks)),
-            overrides=self.subtitle_adapter_overrides,
-        )
-
-    def _get_timeline_items(self):
-        return self.overlay_manager.get_all_items() + self._get_subtitle_adapter_items()
-
-    def _get_any_overlay_item(self, item_id):
-        item = self.overlay_manager.get_item(item_id)
-        if item is not None:
-            return item
-        for sub_item in self._get_subtitle_adapter_items():
-            if sub_item.id == item_id:
-                return sub_item
-        return None
-
-    def _get_subtitle_segment_index(self, item):
-        if not item or item.type != 'subtitle':
-            return None
-        extra = getattr(item, 'extra', {}) or {}
-        idx = extra.get('segment_index')
-        return idx if isinstance(idx, int) else None
-
-    def _apply_item_timeline_times(self, item, start_time, end_time):
-        start_time = max(0.0, float(start_time))
-        end_time = max(start_time, float(end_time))
-        if item.type == 'subtitle':
-            idx = self._get_subtitle_segment_index(item)
-            if idx is None:
-                return
-            ov = dict(self.subtitle_adapter_overrides.get(idx, {}))
-            ov['start_time'] = start_time
-            ov['end_time'] = end_time
-            self.subtitle_adapter_overrides[idx] = ov
-        else:
-            item.start_time = start_time
-            item.end_time = end_time
-
     def refresh_overlay_property_panel(self):
-        selected = self._get_any_overlay_item(self.overlay_manager.selected_item_id)
+        selected = self.overlay_manager.get_selected()
         if selected is None:
             for key, var in self.overlay_prop_vars.items():
                 if key == 'visible':
@@ -1089,37 +1025,20 @@ class CustomModelApp:
             btn.configure(state=tk.NORMAL)
 
     def apply_selected_overlay_properties(self):
-        selected = self._get_any_overlay_item(self.overlay_manager.selected_item_id)
+        selected = self.overlay_manager.get_selected()
         if selected is None:
             return
         try:
-            if selected.type != 'subtitle':
-                selected.x = max(0.0, float(self.overlay_prop_vars['x'].get()))
-            if selected.type != 'subtitle':
-                selected.y = max(0.0, float(self.overlay_prop_vars['y'].get()))
-                selected.width = max(16.0, float(self.overlay_prop_vars['width'].get()))
-                selected.height = max(16.0, float(self.overlay_prop_vars['height'].get()))
+            selected.x = max(0.0, float(self.overlay_prop_vars['x'].get()))
+            selected.y = max(0.0, float(self.overlay_prop_vars['y'].get()))
+            selected.width = max(16.0, float(self.overlay_prop_vars['width'].get()))
+            selected.height = max(16.0, float(self.overlay_prop_vars['height'].get()))
             start_time = max(0.0, float(self.overlay_prop_vars['start_time'].get()))
             end_time = max(start_time, float(self.overlay_prop_vars['end_time'].get()))
-            if selected.type == 'subtitle':
-                idx = self._get_subtitle_segment_index(selected)
-                if idx is None:
-                    return
-                ov = dict(self.subtitle_adapter_overrides.get(idx, {}))
-                ov['start_time'] = start_time
-                ov['end_time'] = end_time
-                ov['visible'] = bool(self.overlay_prop_vars['visible'].get())
-                ov['font_size'] = max(8.0, float(self.overlay_prop_vars['font_size'].get() or selected.font_size or 48))
-                color = self.overlay_prop_vars['text_color'].get().strip() or '#FFFFFF'
-                if not color.startswith('#') or len(color) not in (4, 7):
-                    raise ValueError
-                ov['text_color'] = color
-                self.subtitle_adapter_overrides[idx] = ov
-            else:
-                selected.start_time = start_time
-                selected.end_time = end_time
-                selected.opacity = max(0.0, min(1.0, float(self.overlay_prop_vars['opacity'].get())))
-                selected.visible = bool(self.overlay_prop_vars['visible'].get())
+            selected.start_time = start_time
+            selected.end_time = end_time
+            selected.opacity = max(0.0, min(1.0, float(self.overlay_prop_vars['opacity'].get())))
+            selected.visible = bool(self.overlay_prop_vars['visible'].get())
             if selected.type == 'text':
                 selected.text = self.overlay_prop_vars['text'].get()
                 selected.font_size = max(8.0, float(self.overlay_prop_vars['font_size'].get() or 48))
@@ -1136,18 +1055,10 @@ class CustomModelApp:
         self.refresh_overlay_property_panel()
 
     def on_toggle_selected_overlay_visible(self):
-        selected = self._get_any_overlay_item(self.overlay_manager.selected_item_id)
+        selected = self.overlay_manager.get_selected()
         if selected is None:
             return
-        if selected.type == 'subtitle':
-            idx = self._get_subtitle_segment_index(selected)
-            if idx is None:
-                return
-            ov = dict(self.subtitle_adapter_overrides.get(idx, {}))
-            ov['visible'] = bool(self.overlay_prop_vars['visible'].get())
-            self.subtitle_adapter_overrides[idx] = ov
-        else:
-            selected.visible = bool(self.overlay_prop_vars['visible'].get())
+        selected.visible = bool(self.overlay_prop_vars['visible'].get())
         self.refresh_overlay_preview()
         self.refresh_overlay_timeline()
         self.refresh_overlay_property_panel()
@@ -1215,7 +1126,7 @@ class CustomModelApp:
                 return None
             resample = Image.BILINEAR if draft else Image.LANCZOS
             img = img.resize((max(1, int(width)), max(1, int(height))), resample)
-        elif item.type in ('text', 'subtitle'):
+        elif item.type == 'text':
             img = Image.new('RGBA', (max(1, int(width)), max(1, int(height))), (0, 0, 0, 0))
             draw = ImageDraw.Draw(img)
             font = self._get_preview_text_font(max(8, int(item.font_size)))
@@ -1241,9 +1152,9 @@ class CustomModelApp:
             label.bind('<ButtonRelease-1>', self.on_overlay_release)
             self._overlay_label_refs[item.id] = label
         if item.id == self.overlay_manager.selected_item_id:
-            label.configure(image=photo, highlightthickness=2, highlightbackground='#007AFF', highlightcolor='#007AFF', bd=1, relief='solid')
+            label.configure(image=photo, highlightthickness=2, highlightbackground='#007AFF', highlightcolor='#007AFF')
         else:
-            label.configure(image=photo, highlightthickness=0, bd=0, relief='flat')
+            label.configure(image=photo, highlightthickness=0)
         label.image = photo
         label.place(x=int(x), y=int(y), width=max(1, int(w)), height=max(1, int(h)))
         label.lift()
@@ -1278,7 +1189,7 @@ class CustomModelApp:
         self._overlay_resize_dirty_item = None
         if not item_id:
             return
-        item = self._get_any_overlay_item(item_id)
+        item = self.overlay_manager.get_item(item_id)
         if item is None:
             return
         self._invalidate_overlay_preview_cache(item.id)
@@ -1288,11 +1199,8 @@ class CustomModelApp:
             self._position_overlay_handle(rect)
 
     def _compute_overlay_visible_signature(self, time_sec):
-        items = [
-            item for item in self._get_timeline_items()
-            if item.visible and item.start_time <= time_sec <= item.end_time
-        ]
-        return tuple((item.id, item.layer_index) for item in items if item.type in ('image', 'text', 'subtitle'))
+        items = self.overlay_manager.get_visible_items(time_sec)
+        return tuple((item.id, item.layer_index) for item in items if item.type in ('image', 'text'))
 
     def _refresh_overlay_time_state(self, time_sec):
         if self._overlay_drag.get('item_id') and self._overlay_drag.get('mode') == 'resize':
@@ -1308,12 +1216,12 @@ class CustomModelApp:
         preview_w, preview_h = self._get_overlay_preview_size()
         now = self._get_overlay_time() if time_sec is None else time_sec
         self._overlay_last_visible_signature = self._compute_overlay_visible_signature(now)
-        visible_items = [item for item in self._get_timeline_items() if item.visible and item.start_time <= now <= item.end_time]
+        visible_items = self.overlay_manager.get_visible_items(now)
         visible_ids = set()
         selected_id = self.overlay_manager.selected_item_id
         selected_rect = None
         for item in visible_items:
-            if item.type not in ('image', 'text', 'subtitle'):
+            if item.type not in ('image', 'text'):
                 continue
             visible_ids.add(item.id)
             rect = self._update_overlay_label(item, preview_w, preview_h, draft=False)
@@ -1329,36 +1237,15 @@ class CustomModelApp:
         total_duration = 1.0
         if self.player and self.player.get_length() > 0:
             total_duration = max(total_duration, self.player.get_length() / 1000.0)
-        for item in self._get_timeline_items():
+        for item in self.overlay_manager.get_all_items():
             total_duration = max(total_duration, item.end_time)
         return total_duration
-
-    def _get_timeline_zoom_factor(self):
-        raw = getattr(self, 'overlay_zoom_var', None)
-        raw = raw.get() if raw else '1x'
-        try:
-            return max(1.0, float(str(raw).rstrip('xX')))
-        except Exception:
-            return 1.0
-
-    def _get_overlay_timeline_content_width(self, base_width=None):
-        if base_width is None:
-            base_width = max(400, self.overlay_timeline_canvas.winfo_width())
-        return max(base_width, int(base_width * self._get_timeline_zoom_factor()))
-
-    def _time_to_timeline_x(self, time_sec, total_duration=None, width=None):
-        if total_duration is None:
-            total_duration = self._get_overlay_timeline_total_duration()
-        if width is None:
-            width = self._get_overlay_timeline_content_width()
-        span = max(1, width - 130)
-        return 110 + (max(0.0, min(total_duration, time_sec)) / max(total_duration, 0.001)) * span
 
     def _timeline_x_to_time(self, x, total_duration=None, width=None):
         if total_duration is None:
             total_duration = self._get_overlay_timeline_total_duration()
         if width is None:
-            width = self._get_overlay_timeline_content_width()
+            width = max(400, self.overlay_timeline_canvas.winfo_width())
         span = max(1, width - 130)
         return max(0.0, min(total_duration, ((x - 110) / span) * total_duration))
 
@@ -1367,9 +1254,6 @@ class CustomModelApp:
         mode = mode.get() if mode else 'off'
         if mode == '0.1s':
             return 0.1
-        if mode == 'frame':
-            fps = float(getattr(self, '_timeline_fps', 30.0) or 30.0)
-            return 1.0 / max(1.0, fps)
         return None
 
     def _snap_timeline_time(self, value):
@@ -1378,59 +1262,17 @@ class CustomModelApp:
             return max(0.0, value)
         return max(0.0, round(value / step) * step)
 
-    def _get_timeline_ruler_step(self, total_duration=None, width=None):
-        if total_duration is None:
-            total_duration = self._get_overlay_timeline_total_duration()
-        if width is None:
-            width = self._get_overlay_timeline_content_width()
-        span = max(1, width - 130)
-        target_px = 90
-        candidates = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0]
-        for step in candidates:
-            px = (step / max(total_duration, 0.001)) * span
-            if px >= target_px:
-                return step
-        return candidates[-1]
-
-    def _draw_overlay_timeline_ruler(self, total_duration, width, ruler_h=24):
-        canvas = self.overlay_timeline_canvas
-        step = self._get_timeline_ruler_step(total_duration, width)
-        t = 0.0
-        while t <= total_duration + (step * 0.5):
-            x = self._time_to_timeline_x(t, total_duration, width)
-            canvas.create_line(x, 4, x, ruler_h, fill=self.C['border'], tags=('timeline_ruler',))
-            canvas.create_text(x + 2, 2, text=f'{t:.1f}', anchor='nw', fill=self.C['text2'], font=('Noto Sans KR', 9), tags=('timeline_ruler',))
-            t += step
-        canvas.create_line(110, ruler_h, width - 10, ruler_h, fill=self.C['border'], tags=('timeline_ruler',))
-
-    def _hit_overlay_timeline_items(self, x, y):
-        hits = []
+    def _hit_overlay_timeline_item(self, x, y):
         for item_id, info in reversed(list(self._overlay_timeline_regions.items())):
             x1, y1, x2, y2 = info['rect']
             if x1 <= x <= x2 and y1 <= y <= y2:
                 edge = 8
                 if abs(x - x1) <= edge:
-                    mode = 'trim_start'
-                elif abs(x - x2) <= edge:
-                    mode = 'trim_end'
-                else:
-                    mode = 'move'
-                hits.append((item_id, mode))
-        return hits
-
-    def _pick_overlay_timeline_hit(self, hits, x, y, advance=False):
-        if not hits:
-            self._overlay_timeline_cycle = {'key': None, 'index': 0, 'items': []}
-            return None, None
-        cycle_key = (round(x / 6), round(y / 6), tuple(hit[0] for hit in hits))
-        cycle = getattr(self, '_overlay_timeline_cycle', {'key': None, 'index': 0, 'items': []})
-        if cycle.get('key') != cycle_key:
-            cycle = {'key': cycle_key, 'index': 0, 'items': hits[:]}
-        elif advance:
-            cycle['index'] = (cycle.get('index', 0) + 1) % len(hits)
-            cycle['items'] = hits[:]
-        self._overlay_timeline_cycle = cycle
-        return cycle['items'][cycle['index']]
+                    return item_id, 'trim_start'
+                if abs(x - x2) <= edge:
+                    return item_id, 'trim_end'
+                return item_id, 'move'
+        return None, None
 
     def refresh_overlay_timeline(self):
         if not hasattr(self, 'overlay_timeline_canvas'):
@@ -1438,63 +1280,44 @@ class CustomModelApp:
         canvas = self.overlay_timeline_canvas
         canvas.delete('all')
         self._overlay_timeline_regions = {}
-        visible_width = max(400, canvas.winfo_width())
-        width = self._get_overlay_timeline_content_width(visible_width)
+        width = max(400, canvas.winfo_width())
         row_h = 34
-        ruler_h = 24
-        top_pad = 10
         total_duration = self._get_overlay_timeline_total_duration()
-        track_specs = [(idx, track.name, sorted(track.items, key=lambda ov: (ov.layer_index, ov.id))) for idx, track in enumerate(self.overlay_manager.tracks)]
-        subtitle_items = self._get_subtitle_adapter_items()
-        if subtitle_items:
-            track_specs.append((len(track_specs), 'Subtitle Adapter', subtitle_items))
-        self._draw_overlay_timeline_ruler(total_duration, width, ruler_h)
-        for track_idx, track_name, track_items in track_specs:
-            y1 = top_pad + ruler_h + track_idx * row_h
+        for track_idx, track in enumerate(self.overlay_manager.tracks):
+            y1 = 10 + track_idx * row_h
             y2 = y1 + 24
-            canvas.create_text(10, y1 + 12, text=track_name, anchor='w', fill=self.C['text2'], font=('Noto Sans KR', 10))
-            for item in track_items:
-                x1 = self._time_to_timeline_x(item.start_time, total_duration, width)
-                x2 = self._time_to_timeline_x(item.end_time, total_duration, width)
+            canvas.create_text(10, y1 + 12, text=track.name, anchor='w', fill=self.C['text2'], font=('Noto Sans KR', 10))
+            for item in sorted(track.items, key=lambda ov: (ov.layer_index, ov.id)):
+                x1 = 110 + (item.start_time / total_duration) * max(1, width - 130)
+                x2 = 110 + (item.end_time / total_duration) * max(1, width - 130)
                 x2 = max(x1 + 18, x2)
                 is_selected = item.id == self.overlay_manager.selected_item_id
                 fill = '#0A84FF' if is_selected else ('#5AC8FA' if item.visible else '#8E8E93')
                 outline = '#FFFFFF' if is_selected else ''
                 canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline=outline, width=1, tags=(item.id, 'overlay_item'))
-                if item.type == 'text':
-                    tag_name = 'TXT'
-                elif item.type == 'subtitle':
-                    tag_name = 'SUB'
-                else:
-                    tag_name = 'IMG'
+                tag_name = 'TXT' if item.type == 'text' else 'IMG'
                 label = f'{tag_name} {item.layer_index}' if item.visible else f'{tag_name} {item.layer_index} OFF'
                 text_fill = 'white' if item.visible else '#E5E5EA'
                 canvas.create_text(x1 + 6, y1 + 12, text=label, anchor='w', fill=text_fill, font=('Noto Sans KR', 9, 'bold'), tags=(item.id, 'overlay_item'))
                 self._overlay_timeline_regions[item.id] = {'rect': (x1, y1, x2, y2), 'track_index': track_idx}
-        total_tracks = max(1, len(track_specs))
-        scroll_h = 6 if getattr(self, 'overlay_timeline_hscroll', None) and self.overlay_timeline_hscroll.winfo_exists() else 0
-        bottom = top_pad + ruler_h + total_tracks * row_h + 12 + scroll_h
-        canvas.configure(scrollregion=(0, 0, width, bottom))
-        self._update_overlay_timeline_playhead(total_duration, width, row_h, ruler_h, top_pad, total_tracks)
+        self._update_overlay_timeline_playhead(total_duration, width, row_h)
 
-    def _update_overlay_timeline_playhead(self, total_duration=None, width=None, row_h=34, ruler_h=24, top_pad=10, total_tracks=None):
+    def _update_overlay_timeline_playhead(self, total_duration=None, width=None, row_h=34):
         if not hasattr(self, 'overlay_timeline_canvas'):
             return
         canvas = self.overlay_timeline_canvas
         if width is None:
-            width = self._get_overlay_timeline_content_width()
+            width = max(400, canvas.winfo_width())
         if total_duration is None:
             total_duration = 1.0
             if self.player and self.player.get_length() > 0:
                 total_duration = max(total_duration, self.player.get_length() / 1000.0)
-            for item in self._get_timeline_items():
+            for item in self.overlay_manager.get_all_items():
                 total_duration = max(total_duration, item.end_time)
-        if total_tracks is None:
-            total_tracks = max(1, len(self.overlay_manager.tracks) + (1 if self._get_subtitle_adapter_items() else 0))
         current_sec = self._get_overlay_time()
-        x = self._time_to_timeline_x(current_sec, total_duration, width)
-        y1 = 4
-        y2 = top_pad + ruler_h + total_tracks * row_h + 6
+        x = 110 + (current_sec / max(total_duration, 0.001)) * max(1, width - 130)
+        y1 = 8
+        y2 = 10 + max(1, len(self.overlay_manager.tracks)) * row_h + 6
         if self._overlay_timeline_playhead and canvas.type(self._overlay_timeline_playhead):
             canvas.coords(self._overlay_timeline_playhead, x, y1, x, y2)
             canvas.itemconfigure(self._overlay_timeline_playhead, fill='#FF453A', width=2)
@@ -1502,17 +1325,14 @@ class CustomModelApp:
             self._overlay_timeline_playhead = canvas.create_line(x, y1, x, y2, fill='#FF453A', width=2)
 
     def on_overlay_timeline_press(self, event):
-        canvas_x = self.overlay_timeline_canvas.canvasx(event.x)
-        shift_pressed = bool(event.state & 0x0001)
-        hits = self._hit_overlay_timeline_items(canvas_x, event.y)
-        item_id, mode = self._pick_overlay_timeline_hit(hits, canvas_x, event.y, advance=shift_pressed or len(hits) > 1)
+        item_id, mode = self._hit_overlay_timeline_item(event.x, event.y)
         if not item_id:
             return
-        item = self._get_any_overlay_item(item_id)
+        item = self.overlay_manager.get_item(item_id)
         if item is None:
             return
         self.overlay_manager.set_selected(item_id)
-        press_time = self._timeline_x_to_time(canvas_x)
+        press_time = self._timeline_x_to_time(event.x)
         self._overlay_timeline_drag = {
             'item_id': item_id,
             'mode': mode,
@@ -1528,27 +1348,27 @@ class CustomModelApp:
         item_id = self._overlay_timeline_drag.get('item_id')
         if not item_id:
             return
-        item = self._get_any_overlay_item(item_id)
+        item = self.overlay_manager.get_item(item_id)
         if item is None:
             return
         mode = self._overlay_timeline_drag.get('mode')
-        current_time = self._timeline_x_to_time(self.overlay_timeline_canvas.canvasx(event.x))
+        current_time = self._timeline_x_to_time(event.x)
         min_len = 0.05
         if mode == 'move':
-            raw_delta = current_time - self._overlay_timeline_drag['press_time']
-            duration = self._overlay_timeline_drag['origin_end'] - self._overlay_timeline_drag['origin_start']
-            new_start = self._snap_timeline_time(self._overlay_timeline_drag['origin_start'] + raw_delta)
-            new_end = self._snap_timeline_time(new_start + duration)
+            delta = self._snap_timeline_time(current_time - self._overlay_timeline_drag['press_time'])
+            new_start = self._overlay_timeline_drag['origin_start'] + delta
+            new_end = self._overlay_timeline_drag['origin_end'] + delta
             if new_start < 0:
+                new_end -= new_start
                 new_start = 0.0
-                new_end = self._snap_timeline_time(new_start + duration)
-            self._apply_item_timeline_times(item, new_start, max(new_start + min_len, new_end))
+            item.start_time = new_start
+            item.end_time = max(new_start + min_len, new_end)
         elif mode == 'trim_start':
             new_start = self._snap_timeline_time(current_time)
-            self._apply_item_timeline_times(item, min(max(0.0, new_start), item.end_time - min_len), item.end_time)
+            item.start_time = min(max(0.0, new_start), item.end_time - min_len)
         elif mode == 'trim_end':
             new_end = self._snap_timeline_time(current_time)
-            self._apply_item_timeline_times(item, item.start_time, max(item.start_time + min_len, new_end))
+            item.end_time = max(item.start_time + min_len, new_end)
         self.refresh_overlay_preview()
         self.refresh_overlay_timeline()
         self.refresh_overlay_property_panel()
@@ -1579,7 +1399,7 @@ class CustomModelApp:
         }
 
     def on_overlay_item_press(self, item_id, event):
-        item = self._get_any_overlay_item(item_id)
+        item = self.overlay_manager.get_item(item_id)
         if item is None:
             return
         self.overlay_manager.set_selected(item_id)
@@ -1601,7 +1421,7 @@ class CustomModelApp:
             self.refresh_overlay_preview()
             self.refresh_overlay_property_panel()
             return
-        item = self._get_any_overlay_item(item_id)
+        item = self.overlay_manager.get_item(item_id)
         if item is None:
             return
         self.overlay_manager.set_selected(item_id)
@@ -1620,7 +1440,7 @@ class CustomModelApp:
         item_id = self._overlay_drag.get('item_id')
         if not item_id:
             return
-        item = self._get_any_overlay_item(item_id)
+        item = self.overlay_manager.get_item(item_id)
         if item is None:
             return
         preview_w, preview_h = self._get_overlay_preview_size()
@@ -1679,10 +1499,6 @@ class CustomModelApp:
                 
             if self.player.load_video(p):
                 self.reset_for_new_video()
-                try:
-                    self._timeline_fps = float(self.video_editor.get_media_info(p).get('fps', 30.0) or 30.0)
-                except Exception:
-                    self._timeline_fps = 30.0
                 def _resize():
                     w, h = self.player.get_video_resolution()
                     if w > 0 and h > 0:
@@ -1759,7 +1575,7 @@ class CustomModelApp:
 
     def _collect_overlays_for_export(self):
         overlays = []
-        for item in self._get_timeline_items():
+        for item in self.overlay_manager.get_all_items():
             if not item.visible:
                 continue
             if item.type == 'image':
@@ -1778,9 +1594,9 @@ class CustomModelApp:
                     'track_index': item.track_index,
                     'layer_index': item.layer_index,
                 })
-            elif item.type in ('text', 'subtitle'):
+            elif item.type == 'text':
                 overlays.append({
-                    'type': item.type,
+                    'type': 'text',
                     'text': item.text or '',
                     'start_time': item.start_time,
                     'end_time': item.end_time,

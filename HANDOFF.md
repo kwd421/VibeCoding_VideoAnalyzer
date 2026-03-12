@@ -1,77 +1,155 @@
-﻿# VibeCoding_VideoAnalyzer Handoff
+# VibeCoding_VideoAnalyzer Handoff
 
 ## Purpose
-- Preserve working context across machines and sessions.
-- Help the next agent understand what is stable, what was attempted, and what to avoid.
+- Preserve current working context across sessions and machines.
+- Give the next agent a stable, practical picture of what exists now.
+- Separate proven behavior from experimental or partially verified behavior.
 
-## Project Snapshot
-- Project: `VibeCoding_VideoAnalyzer`
-- Main app entry: `main.py`
-- Main UI: `gui_app.py`
-- Transcription engine: `engine_core.py`
-- Word/block editor: `ui_block_editor.py`
-- Playback wrapper: `video_player.py`
-
-## Rules To Read First
+## Read First
 - `CODEX.md`
 - `GEMINI.md`
+- `DEPLOYMENT.md`
 
-## Current Stable Changes
-- Startup splash screen with visible progress was added in `main.py`.
-- New video selection now clears previous transcript/block state in `gui_app.py`.
-- `video_player.py` uses a local timeout inside async load wait logic.
-- Temp file cleanup is scoped to the script directory instead of the process CWD.
-- Frozen builds now resolve runtime paths from the executable directory.
-- Bundled Faster-Whisper models are preferred over remote download when available.
-- A repeatable release script is available in `build_release.bat` and uses `--clean`.
-- Deployment notes are documented in `DEPLOYMENT.md`.
+## Current Project Direction
+- The project is no longer just an STT/subtitle tool.
+- It now has a growing overlay/timeline editing path layered on top of the existing subtitle workflow.
+- Current strategy is additive and hybrid:
+  - keep the legacy subtitle flow alive,
+  - add overlay-based editing in parallel,
+  - avoid big-bang replacement.
 
-## Recent Sync Experiments
-- We attempted word-level sync improvements in `engine_core.py`, `gui_app.py`, and `ui_block_editor.py`.
-- Those experiments caused regressions:
-  - some word blocks stopped highlighting,
-  - sync did not improve reliably,
-  - user requested full rollback.
-- Result: those sync experiments were reverted.
-- Current guidance: do not re-apply word timing changes directly in core paths without a clearly isolated experimental toggle.
+## Current Stable Core
+- Main entry: `main.py`
+- Main UI shell: `gui_app.py`
+- Transcription/ASR engine: `engine_core.py`
+- Player wrapper: `video_player.py`
+- Subtitle/block editor: `ui_block_editor.py`
+- Render/export path: `video_editor.py`
+- Orchestration: `analysis_controller.py`
+
+## Overlay/Timeline State
+- `overlay_manager.py`
+  - owns `OverlayItem`, `TimelineTrack`, `OverlayManager`
+  - supports image/text overlays and selection/layer management
+- `subtitle_overlay_adapter.py`
+  - maps existing `results_data` rows into transient `subtitle` overlay items
+  - uses override maps instead of mutating transcript source data
+- `gui_app.py`
+  - has `Overlay Timeline` tab
+  - supports:
+    - ImageOverlay preview
+    - TextOverlay preview
+    - Subtitle adapter preview behind a toggle
+    - overlay selection
+    - move/resize for image/text preview items
+    - ghost-box resize for smoother UX
+    - layer ordering
+    - visible toggle
+    - delete for manual image/text overlays
+    - timeline playhead
+    - timeline move and trim
+    - 0.1s snapping
+    - scrollable overlay properties panel
+- `video_editor.py`
+  - renders image/text/subtitle overlay items into exported video
+  - existing ASS path is still present and should remain untouched unless explicitly changing subtitle export behavior
+
+## Behavior That Has Been Explicitly Preserved
+- Existing `results_data` / `Treeview` / block editor structure remains in place.
+- Existing ASS-based subtitle render/export path remains available.
+- Existing analysis flow remains separate from overlay editing.
+- Word-sync experiments that caused regressions were rolled back earlier and should stay isolated if revisited.
+
+## Important Current UX/Architecture Decisions
+- Subtitle adapter is not full subtitle-system replacement.
+- Subtitle adapter edits are limited and use override maps, not transcript mutation.
+- Overlay preview uses a viewport-aware coordinate mapping so window resize does not corrupt stored geometry.
+- Resize drag uses ghost-box preview to avoid repeated image regeneration.
+- `update_loop()` remains 16ms for playback/highlight accuracy.
+- Overlay full refresh is no longer tied directly to every 16ms loop iteration.
+
+## What Is Proven vs. What Is Not
+
+### Proven Recently
+- ImageOverlay preview/render path
+- Multiple image overlays with layer ordering
+- TextOverlay preview/render path
+- Text color, font size, wrapping, left/center alignment
+- Subtitle adapter preview/timeline/render path
+- Subtitle adapter limited style/position/time overrides
+- Timeline playhead
+- Timeline move/trim with 0.1s snapping
+- Overlay property panel scrolling
+- Bottom playback controls visible at default window size
+- Delete selected image/text overlay
+- Ghost-box resize performance path
+
+### Still Limited / Not Fully Mature
+- Overlapping timeline item selection is still topmost-first and not ideal.
+- Subtitle adapter overrides are session-memory data, not durable project storage.
+- Overlay timeline is minimally editable, not a full NLE timeline.
+- No keyframes, fade curves, rotation editing, or audio overlay editing.
+- No robust project save/load model for overlay state yet.
+
+## String/Encoding Handoff Notes
+- `gui_app.py` is now stored as UTF-8 again; the emergency `latin-1` dependency was removed after execution-safe normalization.
+- Some internal comments are still mojibake and can be cleaned up later, but the current priority state is: runnable source + correct Korean UI labels.
+- `gui_app.py` previously suffered from encoding damage, broken literals, and non-printable characters; it has been brought back to a runnable state through targeted recovery.
+- User-facing UI should stay Korean by default; future sessions should treat UI language regressions as real regressions, not cosmetic cleanup.
+- When string damage reappears, prioritize execution stability and correct on-screen labels before comment beautification.
+- After any string or encoding change, re-run `py_compile`, import, app creation, and a basic UI label check together.
+
+## Recent gui_app.py Damage Incident
+- `gui_app.py` recently suffered major damage after an unsafe line-range overwrite edit.
+- Recovery then proceeded from a known-good baseline file rather than guessing from the damaged fragment.
+- Future `gui_app.py` edits must use context-based patching only.
+- Large-file edits require a backup first and `py_compile` / import / app creation checks immediately after the edit.
+- String/encoding repair and feature work should be split into separate tasks whenever possible.
+- If file size drops unexpectedly, imports fail, or major classes disappear, stop immediately and report the damage before continuing.
 
 ## Known Active Concerns
-- Word-level highlight sync is still imperfect.
-- The user specifically reported:
-  - some words highlight too early or too late,
-  - the issue is not a simple global offset,
-  - prior attempts that changed timing logic made things worse.
-- If revisiting this:
-  - use an experimental on/off toggle,
-  - avoid changing default behavior first,
-  - test against real sample clips before keeping changes.
+- Word highlight sync is still imperfect and should not be touched casually.
+- The overlay system is now usable, but selection ergonomics in overlapping cases still need refinement.
+- Documentation had drifted behind implementation; this file and `DEPLOYMENT.md` were refreshed to catch up.
 
-## User Preferences
-- Functionality breakage is unacceptable.
-- Experimental features should be behind an explicit on/off switch.
-- The user values practical behavior over theoretical improvements.
-- Explanations should be clear and concrete, especially when something changed or regressed.
+## Current User Priorities
+- Function breakage is unacceptable.
+- Keep changes small and verifiable.
+- Prefer proven behavior over ambitious refactors.
+- Do not remove legacy subtitle functionality while overlay features are still maturing.
+- The user prefers concrete verification over claims of correctness.
 
-## Suggested Workflow For Next Session
-1. Read `CODEX.md` and `GEMINI.md`.
+## Suggested Next-Session Workflow
+1. Read `CODEX.md`.
 2. Read this file.
 3. Check `git status`.
-4. Confirm whether the user wants stable fixes or experimental features.
-5. Keep risky logic behind toggles.
+4. Distinguish:
+   - stable UX fix,
+   - small overlay/timeline extension,
+   - risky experimental work.
+5. Preserve existing render, subtitle, and playback paths unless the task explicitly targets them.
 
-## Files Worth Inspecting For Future Work
-- `main.py`: startup splash and boot flow
-- `gui_app.py`: analysis option wiring, state reset, playback loop, UI state
-- `engine_core.py`: ASR pipeline and word timestamp generation
-- `ui_block_editor.py`: active word highlighting logic
-- `video_player.py`: VLC timing behavior
+## Files Worth Inspecting Next
+- `gui_app.py`
+  - overlay timeline UI
+  - overlay property panel
+  - viewport/preview layout
+  - playback/update loop
+- `overlay_manager.py`
+  - item model, selection, ordering, geometry conversion
+- `subtitle_overlay_adapter.py`
+  - transient subtitle overlay mapping and override application
+- `video_editor.py`
+  - overlay render path
+- `ui_block_editor.py`
+  - legacy subtitle/word editing path
 
-## Testing Notes
-- For startup behavior, verify the splash appears before heavy import work and reaches 100%.
-- For new video loading, verify old transcript rows and word blocks are cleared.
-- For sync work, always test on a real problematic sample, not just synthetic assumptions.
-- If sync work is experimental, provide a rollback path and default it to off.
+## Deployment Notes Summary
+- Build with `build_release.bat`
+- Current build strategy still relies on the existing frozen app pipeline
+- Overlay/text/subtitle-adapter features should be included in the app because they live in `gui_app.py`, `overlay_manager.py`, `subtitle_overlay_adapter.py`, and existing render modules
+- If packaging is revisited, verify that these newer modules are included in the frozen build
 
-## Current Non-Code Diffs
-- Temporary preview subtitle files like `temp_preview_A.ass` and `temp_preview_B.ass` may be modified during app usage.
-- These are generated artifacts, not core source changes.
+## Current Non-Code Diff Notes
+- Preview subtitle temp files like `temp_preview_A.ass` and `temp_preview_B.ass` can change during normal app usage.
+- Render test artifacts may also appear in the project root during development/testing.
