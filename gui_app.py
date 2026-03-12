@@ -371,12 +371,12 @@ class CustomModelApp:
         self.preview_overlay_canvas.bind('<Button-1>', self.on_overlay_press)
         self.preview_overlay_canvas.bind('<B1-Motion>', self.on_overlay_drag)
         self.preview_overlay_canvas.bind('<ButtonRelease-1>', self.on_overlay_release)
-        self.overlay_resize_handle = tk.Frame(self.root, width=10, height=10, bg='#007AFF', cursor='bottom_right_corner')
+        self.overlay_resize_handle = tk.Frame(self.preview_overlay_window, width=10, height=10, bg='#007AFF', cursor='bottom_right_corner')
         self.overlay_resize_handle.place_forget()
         self.overlay_resize_handle.bind('<Button-1>', self.on_overlay_handle_press)
         self.overlay_resize_handle.bind('<B1-Motion>', self.on_overlay_drag)
         self.overlay_resize_handle.bind('<ButtonRelease-1>', self.on_overlay_release)
-        self.overlay_rotate_handle = tk.Frame(self.root, width=12, height=12, bg='#FF9F0A', cursor='exchange')
+        self.overlay_rotate_handle = tk.Frame(self.preview_overlay_window, width=12, height=12, bg='#FF9F0A', cursor='exchange')
         self.overlay_rotate_handle.place_forget()
         self.overlay_rotate_handle.bind('<Button-1>', self.on_overlay_rotate_press)
         self.overlay_rotate_handle.bind('<B1-Motion>', self.on_overlay_drag)
@@ -590,27 +590,27 @@ class CustomModelApp:
         def _sep(parent):
             ctk.CTkFrame(parent, fg_color=C['border'], height=1, corner_radius=999).pack(fill=tk.X, padx=16, pady=8)
 
-        c1 = _card(insp_inner, 'File and Engine')
-        self.btn_open = _ctk_button(c1, 'Select Video File', self.on_select_video, kind='secondary', height=42)
+        c1 = _card(insp_inner, '파일 및 엔진')
+        self.btn_open = _ctk_button(c1, '영상 파일 선택', self.on_select_video, kind='secondary', height=42)
         self.btn_open.pack(fill=tk.X, padx=16, pady=(0, 8))
         r = _row(c1)
-        ctk.CTkLabel(r, text='AI Model', text_color=C['text2'], font=_f).pack(side=tk.LEFT)
+        ctk.CTkLabel(r, text='AI 모델', text_color=C['text2'], font=_f).pack(side=tk.LEFT)
         self.ai_model_var = tk.StringVar(value='large-v3-turbo (Default)')
         self.ai_model_combo = ctk.CTkComboBox(r, variable=self.ai_model_var, values=['large-v3-turbo (Default)', 'models/Whisper-Large-v3-turbo-STT-Zeroth-KO-v2 (Local Zeroth)', 'models/whisper-medium-ko-zeroth (Medium-Zeroth)'], width=250, command=lambda _=None: self.reset_action_button())
         self.ai_model_combo.pack(side=tk.RIGHT)
         _sep(c1)
         r = _row(c1)
-        ctk.CTkLabel(r, text='Device', text_color=C['text2'], font=_f).pack(side=tk.LEFT)
+        ctk.CTkLabel(r, text='장치', text_color=C['text2'], font=_f).pack(side=tk.LEFT)
         self.device_var = tk.StringVar(value='CPU (50%)')
         self.device_combo = ctk.CTkComboBox(r, variable=self.device_var, values=['Auto', 'NVIDIA (cuda)', 'Apple Mac (mps)', 'CPU (25%)', 'CPU (50%)', 'CPU (75%)'], width=180)
         self.device_combo.pack(side=tk.RIGHT)
         r = _row(c1)
-        ctk.CTkLabel(r, text='Language', text_color=C['text2'], font=_f).pack(side=tk.LEFT)
+        ctk.CTkLabel(r, text='언어', text_color=C['text2'], font=_f).pack(side=tk.LEFT)
         self.lang_var = tk.StringVar(value='Korean (ko)')
         self.lang_combo = ctk.CTkComboBox(r, variable=self.lang_var, values=['Korean (ko)', 'English (en)', 'Japanese (ja)', 'Chinese (zh)', 'Auto Detect'], width=180)
         self.lang_combo.pack(side=tk.RIGHT)
 
-        c2 = _card(insp_inner, 'Analysis')
+        c2 = _card(insp_inner, '분석')
         self.mode_var = tk.StringVar(value='Speech to Text')
         self.mode_combo = ctk.CTkComboBox(c2, variable=self.mode_var, values=['Speech to Text', 'Speech + Cut Edit', 'Peak Search', 'Silence Removal (VAD)', 'Auto Chapter Split (CLIP)'])
         self.mode_combo.pack(fill=tk.X, padx=16, pady=(0, 8))
@@ -1391,15 +1391,11 @@ class CustomModelApp:
             src = self._get_overlay_source_image(item.source)
             if src is None:
                 return None
-            preview_src = self._remove_preview_matte(src)
             resample = Image.BILINEAR if draft else Image.LANCZOS
-            img = preview_src.resize((width, height), resample)
-            alpha_min, alpha_max = preview_src.getchannel('A').getextrema()
-            has_transparency = alpha_min < 255
+            img = src.resize((width, height), resample)
             rotation = float(getattr(item, 'rotation', 0.0) or 0.0)
             if abs(rotation) > 0.01:
-                fill = (0, 0, 0, 0)
-                img = img.rotate(-rotation, expand=True, resample=Image.BICUBIC if not draft else Image.BILINEAR, fillcolor=fill)
+                img = img.rotate(-rotation, expand=True, resample=Image.BICUBIC if not draft else Image.BILINEAR, fillcolor=(0, 0, 0, 0))
             opacity = max(0.0, min(1.0, float(getattr(item, 'opacity', 1.0) or 1.0)))
             if opacity < 0.999:
                 alpha = img.getchannel('A').point(lambda value: int(value * opacity))
@@ -1415,6 +1411,77 @@ class CustomModelApp:
             draw.multiline_text((6, 6), item.text or '', font=font, fill=self._hex_to_rgba(item.text_color, item.opacity), spacing=4)
             return img
         return None
+
+    def _rotate_overlay_point(self, cx, cy, px, py, rotation_deg):
+        theta = math.radians(-(float(rotation_deg or 0.0)))
+        dx = px - cx
+        dy = py - cy
+        cos_t = math.cos(theta)
+        sin_t = math.sin(theta)
+        return (
+            cx + (dx * cos_t) - (dy * sin_t),
+            cy + (dx * sin_t) + (dy * cos_t),
+        )
+
+    def _get_image_overlay_geometry(self, item, preview_w, preview_h):
+        x, y, w, h = self.overlay_manager.preview_rect(item, preview_w, preview_h)
+        cx = x + (w / 2.0)
+        cy = y + (h / 2.0)
+        base_corners = [
+            (x, y),
+            (x + w, y),
+            (x + w, y + h),
+            (x, y + h),
+        ]
+        corners = [self._rotate_overlay_point(cx, cy, px, py, getattr(item, 'rotation', 0.0)) for px, py in base_corners]
+        xs = [pt[0] for pt in corners]
+        ys = [pt[1] for pt in corners]
+        bbox = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+        return {
+            'center': (cx, cy),
+            'base_rect': (x, y, w, h),
+            'corners': corners,
+            'bbox': bbox,
+        }
+
+    def _point_in_polygon(self, x, y, corners):
+        inside = False
+        n = len(corners)
+        for i in range(n):
+            x1, y1 = corners[i]
+            x2, y2 = corners[(i + 1) % n]
+            if ((y1 > y) != (y2 > y)):
+                xinters = (x2 - x1) * (y - y1) / max(1e-9, (y2 - y1)) + x1
+                if x < xinters:
+                    inside = not inside
+        return inside
+
+    def _distance_sq(self, p1, p2):
+        dx = p1[0] - p2[0]
+        dy = p1[1] - p2[1]
+        return dx * dx + dy * dy
+
+    def _offset_corner_handle(self, center, corner, distance):
+        cx, cy = center
+        px, py = corner
+        dx = px - cx
+        dy = py - cy
+        length = math.hypot(dx, dy) or 1.0
+        return (px + (dx / length) * distance, py + (dy / length) * distance)
+
+    def _get_current_time_sec(self):
+        if not self.player:
+            return 0.0
+        try:
+            return max(0.0, self.player.get_time() / 1000.0)
+        except Exception:
+            return 0.0
+
+    def _iter_visible_image_items(self):
+        time_sec = self._get_current_time_sec()
+        for item in self._get_timeline_items():
+            if item.type == 'image' and getattr(item, 'visible', True) and item.start_time <= time_sec <= item.end_time:
+                yield item
 
     def _load_overlay_photo(self, item, width, height, draft=False):
         cache_key = (item.id, item.type, int(width), int(height), item.text or '', round(item.opacity, 3), int(item.font_size), item.text_color, round(float(getattr(item, 'rotation', 0.0) or 0.0), 1), bool(draft))
@@ -1448,12 +1515,10 @@ class CustomModelApp:
         widget = self._overlay_label_refs.get(item.id)
 
         if is_image:
+            geom = self._get_image_overlay_geometry(item, preview_w, preview_h)
+            center_x, center_y = geom['center']
             display_w = max(1, int(photo.width()))
             display_h = max(1, int(photo.height()))
-            center_x = x + (w / 2.0)
-            center_y = y + (h / 2.0)
-            canvas_x = int(round(center_x - (display_w / 2.0)))
-            canvas_y = int(round(center_y - (display_h / 2.0)))
 
             stale_widget = self._overlay_label_refs.pop(item.id, None)
             if stale_widget is not None and stale_widget.winfo_exists():
@@ -1472,26 +1537,30 @@ class CustomModelApp:
                 except tk.TclError:
                     pass
 
-            image_id = self.preview_overlay_canvas.create_image(canvas_x, canvas_y, image=photo, anchor='nw', tags=('overlay_image', item.id))
+            image_id = self.preview_overlay_canvas.create_image(center_x, center_y, image=photo, anchor='center', tags=('overlay_image', item.id))
             marker_ids = []
             if is_selected:
                 color = '#FF9F0A'
-                corner = 12
-                lines = [
-                    (canvas_x, canvas_y, canvas_x + corner, canvas_y), (canvas_x, canvas_y, canvas_x, canvas_y + corner),
-                    (canvas_x + display_w, canvas_y, canvas_x + display_w - corner, canvas_y), (canvas_x + display_w, canvas_y, canvas_x + display_w, canvas_y + corner),
-                    (canvas_x, canvas_y + display_h, canvas_x + corner, canvas_y + display_h), (canvas_x, canvas_y + display_h, canvas_x, canvas_y + display_h - corner),
-                    (canvas_x + display_w, canvas_y + display_h, canvas_x + display_w - corner, canvas_y + display_h),
-                    (canvas_x + display_w, canvas_y + display_h, canvas_x + display_w, canvas_y + display_h - corner),
-                ]
-                for x1, y1, x2, y2 in lines:
-                    marker_ids.append(self.preview_overlay_canvas.create_line(x1, y1, x2, y2, fill=color, width=2, tags=('selection_marker', item.id)))
+                flat = []
+                for px, py in geom['corners'] + [geom['corners'][0]]:
+                    flat.extend((px, py))
+                marker_ids.append(self.preview_overlay_canvas.create_line(*flat, fill=color, width=2, joinstyle=tk.ROUND, tags=('selection_marker', item.id)))
+                for px, py in geom['corners']:
+                    marker_ids.append(
+                        self.preview_overlay_canvas.create_oval(
+                            px - 1.5, py - 1.5, px + 1.5, py + 1.5,
+                            fill=color, outline='white', width=1, tags=('selection_marker', item.id)
+                        )
+                    )
             self._overlay_canvas_refs[item.id] = {
                 'image': image_id,
                 'markers': marker_ids,
-                'rect': (canvas_x, canvas_y, display_w, display_h),
+                'rect': geom['bbox'],
+                'corners': geom['corners'],
+                'center': geom['center'],
+                'display_size': (display_w, display_h),
             }
-            return (canvas_x, canvas_y, display_w, display_h)
+            return geom['bbox']
 
         if widget is None or not widget.winfo_exists() or not isinstance(widget, tk.Label):
             if widget is not None and widget.winfo_exists():
@@ -1520,18 +1589,34 @@ class CustomModelApp:
     def _position_overlay_handle(self, rect):
         selected = self._get_any_overlay_item(self.overlay_manager.selected_item_id)
         if rect:
-            x, y, w, h = rect
-            layer_x, layer_y, _, _ = self._get_overlay_layer_geometry()
-            abs_x = int(round(layer_x + x))
-            abs_y = int(round(layer_y + y))
-            self.overlay_resize_handle.place(x=max(0, abs_x + w - 10), y=max(0, abs_y + h - 10), width=10, height=10)
-            self.overlay_resize_handle.lift()
             if selected is not None and selected.type == 'image':
-                handle_x = max(0, abs_x + w + 6)
-                handle_y = max(12, abs_y - 6)
-                self.overlay_rotate_handle.place(x=handle_x, y=handle_y, width=12, height=12, anchor='sw')
-                self.overlay_rotate_handle.lift()
+                refs = self._overlay_canvas_refs.get(selected.id, {})
+                corners = refs.get('corners')
+                center = refs.get('center')
+                if corners and center:
+                    tr = corners[1]
+                    br = corners[2]
+                    rotate_pt = self._offset_corner_handle(center, tr, 8.0)
+                    resize_pt = self._offset_corner_handle(center, br, 5.0)
+                    self.overlay_rotate_handle.place(
+                        x=max(0, int(round(rotate_pt[0] - 6))),
+                        y=max(0, int(round(rotate_pt[1] - 6))),
+                        width=12, height=12
+                    )
+                    self.overlay_rotate_handle.lift()
+                    self.overlay_resize_handle.place(
+                        x=max(0, int(round(resize_pt[0] - 5))),
+                        y=max(0, int(round(resize_pt[1] - 5))),
+                        width=10, height=10
+                    )
+                    self.overlay_resize_handle.lift()
+                else:
+                    self.overlay_resize_handle.place_forget()
+                    self.overlay_rotate_handle.place_forget()
             else:
+                x, y, w, h = rect
+                self.overlay_resize_handle.place(x=max(0, int(round(x + w - 10))), y=max(0, int(round(y + h - 10))), width=10, height=10)
+                self.overlay_resize_handle.lift()
                 self.overlay_rotate_handle.place_forget()
         else:
             self.overlay_resize_handle.place_forget()
@@ -1884,33 +1969,48 @@ class CustomModelApp:
 
     def _find_overlay_hit(self, x, y):
         selected = self.overlay_manager.get_selected()
-        if selected is None:
-            return None, None
-        if selected.type != 'image':
-            return None, None
-        refs = self._overlay_canvas_refs.get(selected.id)
-        if not refs or not refs.get('rect'):
-            return None, None
-        rx, ry, rw, rh = refs['rect']
-        if not (rx <= x <= rx + rw and ry <= y <= ry + rh):
-            return None, None
-        if x >= rx + rw - 12 and y >= ry + rh - 12:
-            return 'resize', selected.id
-        return 'move', selected.id
+        if selected is not None and selected.type == 'image':
+            refs = self._overlay_canvas_refs.get(selected.id)
+            if refs and refs.get('corners'):
+                corners = refs['corners']
+                center = refs.get('center')
+                if self._point_in_polygon(x, y, corners):
+                    if center and self._distance_sq((x, y), corners[2]) <= (12 * 12):
+                        return 'resize', selected.id
+                    return 'move', selected.id
+
+        visible_images = sorted(
+            (item for item in self._iter_visible_image_items()),
+            key=lambda ov: (ov.track_index, ov.layer_index),
+            reverse=True,
+        )
+        for item in visible_images:
+            refs = self._overlay_canvas_refs.get(item.id)
+            if not refs or not refs.get('corners'):
+                continue
+            corners = refs['corners']
+            center = refs.get('center')
+            if not self._point_in_polygon(x, y, corners):
+                continue
+            if center and self._distance_sq((x, y), corners[2]) <= (12 * 12):
+                return 'resize', item.id
+            return 'move', item.id
+        return None, None
 
     def on_overlay_rotate_press(self, event):
         selected = self.overlay_manager.get_selected()
         if selected is None or selected.type != 'image':
             return
         refs = self._overlay_canvas_refs.get(selected.id)
-        if refs and refs.get('rect'):
-            x, y, w, h = refs['rect']
+        if refs and refs.get('center'):
+            cx, cy = refs['center']
         else:
             preview_w, preview_h = self._get_overlay_preview_size()
-            x, y, w, h = self.overlay_manager.preview_rect(selected, preview_w, preview_h)
+            geom = self._get_image_overlay_geometry(selected, preview_w, preview_h)
+            cx, cy = geom['center']
         layer_x, layer_y, _, _ = self._get_overlay_layer_geometry()
-        cx = layer_x + x + (w / 2)
-        cy = layer_y + y + (h / 2)
+        cx = layer_x + cx
+        cy = layer_y + cy
         start_angle = math.degrees(math.atan2(event.y_root - cy, event.x_root - cx))
         self._overlay_drag = {
             'item_id': selected.id,
@@ -2623,6 +2723,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     for i, r in enumerate(self.results_data):
                         writer.writerow([i+1, r['s'], r['e'], r['t']])
             messagebox.showinfo('완료', '저장되었습니다.')
+
+
+
+
+
 
 
 
