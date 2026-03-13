@@ -388,6 +388,9 @@ class CustomModelApp:
         self.overlay_rotate_handle.bind('<B1-Motion>', self.on_overlay_drag)
         self.overlay_rotate_handle.bind('<ButtonRelease-1>', self.on_overlay_release)
         self.root.bind_all('<Button-1>', self._on_global_pointer_press, add='+')
+        self.root.bind('<Configure>', self._on_root_window_configure, add='+')
+        self.root.bind('<FocusIn>', self._on_root_window_focus_in, add='+')
+        self.root.bind('<Activate>', self._on_root_window_focus_in, add='+')
         def _on_canvas_resize(e):
             self.refresh_overlay_preview()
         self.video_frame.bind("<Configure>", _on_canvas_resize)
@@ -1265,12 +1268,25 @@ class CustomModelApp:
             return
         x, y, w, h = self._get_overlay_layer_geometry()
         if w <= 1 or h <= 1:
+            self._overlay_window_bounds = None
             self.preview_overlay_window.withdraw()
             return
-        self.preview_overlay_window.geometry(f'{w}x{h}+{x}+{y}')
-        self.preview_overlay_window.deiconify()
-        self.preview_overlay_window.lift(self.root)
-        self.preview_overlay_canvas.configure(width=w, height=h)
+        target_bounds = (int(x), int(y), int(w), int(h))
+        bounds_changed = getattr(self, '_overlay_window_bounds', None) != target_bounds
+        if bounds_changed:
+            self._overlay_window_bounds = target_bounds
+            self.preview_overlay_window.geometry(f'{w}x{h}+{x}+{y}')
+        try:
+            window_state = self.preview_overlay_window.state()
+        except tk.TclError:
+            return
+        if window_state == 'withdrawn':
+            self.preview_overlay_window.deiconify()
+            self.preview_overlay_window.lift(self.root)
+        current_w = int(float(self.preview_overlay_canvas.cget('width')))
+        current_h = int(float(self.preview_overlay_canvas.cget('height')))
+        if current_w != int(w) or current_h != int(h):
+            self.preview_overlay_canvas.configure(width=w, height=h)
 
     def _get_overlay_cache_key(self, item_id, width, height):
         return (item_id, int(width), int(height))
@@ -1407,9 +1423,6 @@ class CustomModelApp:
             if opacity < 0.999:
                 alpha = img.getchannel('A').point(lambda value: int(value * opacity))
                 img.putalpha(alpha)
-            alpha_bbox = img.getchannel('A').getbbox()
-            if alpha_bbox:
-                img = img.crop(alpha_bbox)
             return img
         if item.type in ('text', 'subtitle'):
             img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
@@ -1420,7 +1433,7 @@ class CustomModelApp:
         return None
 
     def _rotate_overlay_point(self, cx, cy, px, py, rotation_deg):
-        theta = math.radians(-(float(rotation_deg or 0.0)))
+        theta = math.radians(float(rotation_deg or 0.0))
         dx = px - cx
         dy = py - cy
         cos_t = math.cos(theta)
@@ -1454,12 +1467,24 @@ class CustomModelApp:
 
     def _get_screen_corner_roles(self, center, corners):
         ordered = list(corners)
+        if len(ordered) != 4:
+            return {
+                'top_left': ordered[0] if ordered else center,
+                'top_right': ordered[1] if len(ordered) > 1 else center,
+                'bottom_right': ordered[2] if len(ordered) > 2 else center,
+                'bottom_left': ordered[3] if len(ordered) > 3 else center,
+                'ordered': ordered,
+            }
+        top_two = sorted(sorted(ordered, key=lambda pt: (pt[1], pt[0]))[:2], key=lambda pt: pt[0])
+        bottom_two = sorted(sorted(ordered, key=lambda pt: (-pt[1], pt[0]))[:2], key=lambda pt: pt[0])
+        top_left, top_right = top_two[0], top_two[1]
+        bottom_left, bottom_right = bottom_two[0], bottom_two[1]
         return {
-            'top_left': ordered[0],
-            'top_right': ordered[1],
-            'bottom_right': ordered[2],
-            'bottom_left': ordered[3],
-            'ordered': ordered,
+            'top_left': top_left,
+            'top_right': top_right,
+            'bottom_right': bottom_right,
+            'bottom_left': bottom_left,
+            'ordered': [top_left, top_right, bottom_right, bottom_left],
         }
 
     def _point_in_polygon(self, x, y, corners):
@@ -1557,7 +1582,7 @@ class CustomModelApp:
 
             image_id = self.preview_overlay_canvas.create_image(center_x, center_y, image=photo, anchor='center', tags=('overlay_image', item.id))
             corner_roles = geom.get('corner_roles', self._get_screen_corner_roles(geom['center'], geom['corners']))
-            ordered_corners = corner_roles['ordered']
+            ordered_corners = list(geom['corners'])
             marker_ids = []
             if is_selected:
                 color = '#FF9F0A'
@@ -1614,10 +1639,9 @@ class CustomModelApp:
                 refs = self._overlay_canvas_refs.get(selected.id, {})
                 corners = refs.get('corners')
                 center = refs.get('center')
-                corner_roles = refs.get('corner_roles', {})
                 if corners and center:
-                    tr = corner_roles.get('top_right', corners[1])
-                    br = corner_roles.get('bottom_right', corners[2])
+                    tr = corners[1] if len(corners) > 1 else corners[0]
+                    br = corners[2] if len(corners) > 2 else corners[-1]
                     rotate_pt = self._offset_corner_handle(center, tr, 8.0)
                     resize_pt = self._offset_corner_handle(center, br, 5.0)
                     self.overlay_rotate_handle.place(
@@ -1677,12 +1701,40 @@ class CustomModelApp:
             self.refresh_overlay_timeline()
         self.refresh_overlay_property_panel()
 
-    def _on_preview_overlay_focus_in(self, event):
+    def _focus_within_preview_overlay(self, widget):
+        overlay_widgets = {
+            getattr(self, 'preview_overlay_window', None),
+            getattr(self, 'preview_overlay_canvas', None),
+            getattr(self, 'overlay_resize_handle', None),
+            getattr(self, 'overlay_rotate_handle', None),
+        }
+        while widget is not None:
+            if widget in overlay_widgets:
+                return True
+            widget = getattr(widget, 'master', None)
+        return False
+
+    def _restore_root_focus_from_overlay(self):
+        self._overlay_focus_redirect_pending = False
         try:
-            if self.root.winfo_exists():
-                self.root.after_idle(self.root.focus_force)
+            if not self.root.winfo_exists():
+                return
+            focus_widget = self.root.focus_get()
+            if self._focus_within_preview_overlay(focus_widget):
+                self.root.focus_set()
         except tk.TclError:
             pass
+
+    def _on_preview_overlay_focus_in(self, event):
+        try:
+            if not self.root.winfo_exists():
+                return
+            if getattr(self, '_overlay_focus_redirect_pending', False):
+                return
+            self._overlay_focus_redirect_pending = True
+            self.root.after_idle(self._restore_root_focus_from_overlay)
+        except tk.TclError:
+            self._overlay_focus_redirect_pending = False
 
     def on_video_surface_press(self, event):
         if self.overlay_manager.selected_item_id is None:
@@ -1712,6 +1764,55 @@ class CustomModelApp:
         if self._is_overlay_click_widget(getattr(event, 'widget', None)):
             return
         self._clear_selected_overlay(refresh_preview=True, refresh_timeline=True)
+
+    def _sync_preview_overlay_window(self):
+        if not hasattr(self, 'preview_overlay_window') or not self.preview_overlay_window.winfo_exists():
+            return
+        try:
+            if self.preview_overlay_window.state() == 'withdrawn':
+                return
+        except tk.TclError:
+            return
+        self._update_overlay_layer_window()
+        self._ensure_preview_overlay_stacking()
+
+    def _raise_preview_overlay_window(self):
+        self._overlay_raise_pending = False
+        if not hasattr(self, 'preview_overlay_window') or not self.preview_overlay_window.winfo_exists():
+            return
+        try:
+            if self.preview_overlay_window.state() == 'withdrawn' or not self.preview_overlay_window.winfo_ismapped():
+                return
+            is_above = bool(int(self.root.tk.call('wm', 'stackorder', str(self.preview_overlay_window), 'isabove', str(self.root))))
+        except Exception:
+            return
+        if not is_above:
+            self.preview_overlay_window.lift(self.root)
+
+    def _ensure_preview_overlay_stacking(self):
+        if not getattr(self, '_overlay_canvas_refs', None):
+            return
+        if getattr(self, '_overlay_raise_pending', False):
+            return
+        if not hasattr(self, 'preview_overlay_window') or not self.preview_overlay_window.winfo_exists():
+            return
+        try:
+            if self.preview_overlay_window.state() == 'withdrawn' or not self.preview_overlay_window.winfo_ismapped():
+                return
+            is_above = bool(int(self.root.tk.call('wm', 'stackorder', str(self.preview_overlay_window), 'isabove', str(self.root))))
+        except Exception:
+            return
+        if is_above:
+            return
+        self._overlay_raise_pending = True
+        self.root.after_idle(self._raise_preview_overlay_window)
+
+    def _on_root_window_configure(self, event):
+        self._sync_preview_overlay_window()
+
+    def _on_root_window_focus_in(self, event):
+        self._sync_preview_overlay_window()
+        self._ensure_preview_overlay_stacking()
 
     def _schedule_overlay_prop_refresh(self, delay=80):
         if self._overlay_prop_refresh_job:
@@ -2168,7 +2269,9 @@ class CustomModelApp:
         if self._overlay_drag['mode'] == 'rotate':
             cx, cy = self._overlay_drag['center_root']
             current_angle = math.degrees(math.atan2(event.y_root - cy, event.x_root - cx))
-            item.rotation = self._overlay_drag['origin_rotation'] - (current_angle - self._overlay_drag['start_angle'])
+            delta = current_angle - self._overlay_drag['start_angle']
+            delta = ((delta + 180.0) % 360.0) - 180.0
+            item.rotation = self._overlay_drag['origin_rotation'] + delta
             self._invalidate_overlay_preview_cache(item.id)
             rect = self._update_overlay_label(item, preview_w, preview_h, draft=False)
             if item.id == self.overlay_manager.selected_item_id:
