@@ -3,9 +3,7 @@ import sys
 import threading
 import time
 import math
-import io
 import queue
-import subprocess
 import tkinter as tk
 import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk, font as tkfont
@@ -201,8 +199,6 @@ class CustomModelApp:
         self._overlay_preview_cache = {}
         self._overlay_source_image_cache = {}
         self._overlay_preview_source_cache = {}
-        self._overlay_video_frame_cache = {}
-        self._overlay_video_photo_refs = {}
         self._overlay_label_refs = {}
         self._overlay_canvas_refs = {}
         self._overlay_resize_refresh_job = None
@@ -364,9 +360,6 @@ class CustomModelApp:
         self.video_frame.pack(fill=tk.BOTH, expand=True)
         self.video_canvas = tk.Frame(self.video_frame, bg='black')
         self.video_canvas.place(x=0, y=0, relwidth=1, relheight=1)
-        self.video_clip_preview_label = tk.Label(self.video_frame, bd=0, highlightthickness=0, bg='black')
-        self.video_clip_preview_label.place_forget()
-        self.video_clip_preview_label.bind('<Button-1>', self.on_video_surface_press)
         self._overlay_transparent_key = '#00FE00'
         self.preview_overlay_window = tk.Toplevel(self.root)
         self.preview_overlay_window.withdraw()
@@ -863,32 +856,6 @@ class CustomModelApp:
         self.refresh_overlay_property_panel()
         self.notebook.select(self.tab_overlay)
 
-    def add_audio_clip(self):
-        audio_path = filedialog.askopenfilename(filetypes=[('Audio files', '*.mp3 *.wav *.m4a *.aac *.flac *.ogg')])
-        if not audio_path:
-            return
-        start_time = self._get_overlay_time()
-        end_time = start_time + 5.0
-        item = self.overlay_manager.create_audio_clip(audio_path, start_time, end_time, label=os.path.basename(audio_path))
-        self.overlay_manager.set_selected(item.id)
-        self.refresh_overlay_preview(start_time)
-        self.refresh_overlay_timeline()
-        self.refresh_overlay_property_panel()
-        self.notebook.select(self.tab_overlay)
-
-    def add_video_clip(self):
-        video_path = filedialog.askopenfilename(filetypes=[('Video files', '*.mp4 *.mkv *.mov *.avi *.webm')])
-        if not video_path:
-            return
-        start_time = self._get_overlay_time()
-        end_time = start_time + 5.0
-        item = self.overlay_manager.create_video_clip(video_path, start_time, end_time, label=os.path.basename(video_path))
-        self.overlay_manager.set_selected(item.id)
-        self.refresh_overlay_preview(start_time)
-        self.refresh_overlay_timeline()
-        self.refresh_overlay_property_panel()
-        self.notebook.select(self.tab_overlay)
-
     def _fmt_overlay_prop(self, value, digits=2):
         try:
             return f"{float(value):.{digits}f}"
@@ -1204,86 +1171,6 @@ class CustomModelApp:
         except Exception:
             return 0.0
 
-    def _get_active_video_item(self, time_sec):
-        active_items = [
-            item for item in self.overlay_manager.get_all_items()
-            if item.type == 'video' and item.start_time <= time_sec <= item.end_time and item.source
-        ]
-        if not active_items:
-            return None
-        active_items.sort(key=lambda item: (item.track_index, item.layer_index, item.id))
-        return active_items[0]
-
-    def _get_video_preview_signature(self, time_sec):
-        item = self._get_active_video_item(time_sec)
-        if item is None:
-            return None
-        local_time = max(0.0, time_sec - item.start_time)
-        return (item.id, round(local_time, 1))
-
-    def _get_video_clip_preview_image(self, item, local_time_sec, preview_w, preview_h):
-        ffmpeg_path = getattr(getattr(self, 'video_editor', None), 'ffmpeg_path', None)
-        source = getattr(item, 'source', None)
-        if not ffmpeg_path or not source or not os.path.exists(source):
-            return None
-        cache_key = (source, round(float(local_time_sec), 1), int(preview_w), int(preview_h))
-        cached = self._overlay_video_frame_cache.get(cache_key)
-        if cached is not None:
-            return cached
-        cmd = [
-            ffmpeg_path, '-ss', f'{max(0.0, float(local_time_sec)):.3f}', '-i', source,
-            '-frames:v', '1', '-vf', f'scale={max(1, int(preview_w))}:{max(1, int(preview_h))}:force_original_aspect_ratio=decrease',
-            '-f', 'image2pipe', '-vcodec', 'png', '-'
-        ]
-        startupinfo = None
-        if os.name == 'nt':
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        try:
-            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo, check=False)
-            if proc.returncode != 0 or not proc.stdout:
-                return None
-            img = Image.open(io.BytesIO(proc.stdout)).convert('RGBA')
-            self._overlay_video_frame_cache.clear()
-            self._overlay_video_frame_cache[cache_key] = img
-            return img
-        except Exception:
-            return None
-
-    def _update_video_clip_preview(self, time_sec, preview_w, preview_h):
-        label = getattr(self, 'video_clip_preview_label', None)
-        if label is None or not label.winfo_exists():
-            return
-        item = self._get_active_video_item(time_sec)
-        if item is None:
-            label.place_forget()
-            label.configure(image='')
-            label.image = None
-            self._overlay_video_photo_refs.pop('active', None)
-            return
-        local_time = max(0.0, time_sec - item.start_time)
-        img = self._get_video_clip_preview_image(item, local_time, preview_w, preview_h)
-        if img is None:
-            label.place_forget()
-            label.configure(image='')
-            label.image = None
-            self._overlay_video_photo_refs.pop('active', None)
-            return
-        photo = ImageTk.PhotoImage(img)
-        self._overlay_video_photo_refs['active'] = photo
-        viewport_x, viewport_y, viewport_w, viewport_h = self._get_video_viewport_rect()
-        display_w = photo.width()
-        display_h = photo.height()
-        x = int(round(viewport_x + (viewport_w - display_w) / 2.0))
-        y = int(round(viewport_y + (viewport_h - display_h) / 2.0))
-        label.configure(image=photo)
-        label.image = photo
-        label.place(x=max(0, x), y=max(0, y), width=display_w, height=display_h)
-        try:
-            label.lift(self.video_canvas)
-        except Exception:
-            pass
-
     def _iter_visible_image_items(self):
         time_sec = self._get_current_time_sec()
         for item in self._get_timeline_items():
@@ -1596,8 +1483,7 @@ class CustomModelApp:
             item for item in self._get_timeline_items()
             if item.visible and item.start_time <= time_sec <= item.end_time
         ]
-        overlay_sig = tuple((item.id, item.layer_index) for item in items if item.type in ('image', 'text', 'subtitle'))
-        return (overlay_sig, self._get_video_preview_signature(time_sec))
+        return tuple((item.id, item.layer_index) for item in items if item.type in ('image', 'text', 'subtitle'))
 
     def _refresh_overlay_time_state(self, time_sec):
         if self._overlay_drag.get('item_id') and self._overlay_drag.get('mode') == 'resize':
@@ -1619,7 +1505,6 @@ class CustomModelApp:
         preview_w, preview_h = self._get_overlay_preview_size()
         now = self._get_overlay_time() if time_sec is None else time_sec
         self._overlay_last_visible_signature = self._compute_overlay_visible_signature(now)
-        self._update_video_clip_preview(now, preview_w, preview_h)
         visible_items = [item for item in self._get_timeline_items() if item.visible and item.start_time <= now <= item.end_time]
         visible_ids = set()
         selected_id = self.overlay_manager.selected_item_id
@@ -1954,7 +1839,6 @@ class CustomModelApp:
                         self._video_aspect = h / w
                         self.overlay_manager.render_width = w
                         self.overlay_manager.render_height = h
-                        self._overlay_video_frame_cache.clear()
                         self.refresh_overlay_preview()
                     self.video_canvas.pack_propagate(False)
                 self.root.after(500, _resize)

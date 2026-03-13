@@ -62,6 +62,32 @@ def build_overlay_tab_static(self, body_font):
         cursor='hand2',
     )
     self.btn_add_text_overlay.pack(side=tk.LEFT, padx=(6, 0))
+    self.btn_add_audio_clip = tk.Button(
+        overlay_toolbar,
+        text='\uC624\uB514\uC624 \uD074\uB9BD \uCD94\uAC00',
+        command=self.add_audio_clip,
+        bg=self.C['bg2'],
+        fg=self.C['text'],
+        relief='flat',
+        bd=0,
+        padx=10,
+        pady=6,
+        cursor='hand2',
+    )
+    self.btn_add_audio_clip.pack(side=tk.LEFT, padx=(6, 0))
+    self.btn_add_video_clip = tk.Button(
+        overlay_toolbar,
+        text='\uBE44\uB514\uC624 \uD074\uB9BD \uCD94\uAC00',
+        command=self.add_video_clip,
+        bg=self.C['bg2'],
+        fg=self.C['text'],
+        relief='flat',
+        bd=0,
+        padx=10,
+        pady=6,
+        cursor='hand2',
+    )
+    self.btn_add_video_clip.pack(side=tk.LEFT, padx=(6, 0))
     self.use_subtitle_adapter_var = tk.BooleanVar(value=False)
     self.subtitle_adapter_check = tk.Checkbutton(
         overlay_toolbar,

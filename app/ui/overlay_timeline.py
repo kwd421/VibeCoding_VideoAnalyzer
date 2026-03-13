@@ -1,3 +1,4 @@
+import os
 def refresh_overlay_timeline(self):
     if not hasattr(self, 'overlay_timeline_canvas'):
         return
@@ -13,7 +14,7 @@ def refresh_overlay_timeline(self):
     track_specs = [(idx, track.name, sorted(track.items, key=lambda ov: (ov.layer_index, ov.id))) for idx, track in enumerate(self.overlay_manager.tracks)]
     subtitle_items = self._get_subtitle_adapter_items()
     if subtitle_items:
-        track_specs.append((len(track_specs), '?? ???', subtitle_items))
+        track_specs.append((len(track_specs), '\uC790\uB9C9 \uC5B4\uB311\uD130', subtitle_items))
     self._draw_overlay_timeline_ruler(total_duration, width, ruler_h)
     for track_idx, track_name, track_items in track_specs:
         y1 = top_pad + ruler_h + track_idx * row_h
@@ -26,14 +27,22 @@ def refresh_overlay_timeline(self):
             is_selected = item.id == self.overlay_manager.selected_item_id
             fill = '#0A84FF' if is_selected else ('#5AC8FA' if item.visible else '#8E8E93')
             outline = '#FFFFFF' if is_selected else ''
-            canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline=outline, width=1, tags=(item.id, 'overlay_item'))
-            if item.type == 'text':
-                tag_name = 'TXT'
-            elif item.type == 'subtitle':
-                tag_name = 'SUB'
+            rect_id = canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline=outline, width=1, tags=(item.id, 'overlay_item'))
+            style_map = {
+                'video': ('VID', '#34C759'),
+                'image': ('IMG', '#5AC8FA'),
+                'text': ('TXT', '#0A84FF'),
+                'audio': ('AUD', '#FF9F0A'),
+                'subtitle': ('SUB', '#AF52DE'),
+            }
+            tag_name, base_fill = style_map.get(item.type, ('ITM', '#8E8E93'))
+            fill = '#0A84FF' if is_selected else (base_fill if item.visible else '#8E8E93')
+            canvas.itemconfigure(rect_id, fill=fill, outline=outline, width=1)
+            label_text = (item.text or item.source or '').strip() if item.type in ('audio', 'video') else ''
+            if label_text:
+                label = f'{tag_name} {os.path.basename(label_text)}'
             else:
-                tag_name = 'IMG'
-            label = f'{tag_name} {item.layer_index}' if item.visible else f'{tag_name} {item.layer_index} OFF'
+                label = f'{tag_name} {item.layer_index}' if item.visible else f'{tag_name} {item.layer_index} OFF'
             text_fill = 'white' if item.visible else '#E5E5EA'
             canvas.create_text(x1 + 6, y1 + 12, text=label, anchor='w', fill=text_fill, font=('Noto Sans KR', 9, 'bold'), tags=(item.id, 'overlay_item'))
             self._overlay_timeline_regions[item.id] = {'rect': (x1, y1, x2, y2), 'track_index': track_idx}
