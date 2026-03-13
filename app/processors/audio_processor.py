@@ -2,7 +2,7 @@ import numpy as np
 import subprocess
 import noisereduce as nr
 import imageio_ffmpeg
-from config_models import TranscriptSegment
+from app.models.config_models import TranscriptSegment
 
 class AudioProcessor:
     """[시니어 최적화] 오디오 추출 및 DSP 필터링 파이프라인 분리"""

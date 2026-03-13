@@ -1,8 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from typing import Dict, Iterable, List
 
-from overlay_manager import OverlayItem
+from app.models.overlay_manager import OverlayItem
 
 
 def _coerce_get(item, key, default=None):

@@ -82,6 +82,14 @@
 - If `gui_app.py` is damaged, prefer the most recent known-good baseline over fragment-based guess recovery.
 
 ## String/Encoding Work Rules
+- Do not perform test-file cleanup or relocation based only on filename patterns.
+- Limit move candidates to a whitelist of artifact files and temporary folders.
+- Root source files such as `gui_app.py`, `main.py`, `analysis_controller.py`, `overlay_manager.py`, `video_editor.py`, `timeline_manager.py`, `text_sanitizer.py`, and `text_overlay_utils.py` are excluded from test cleanup by default.
+- Unless the user explicitly requests it, do not move `.py`, `.md`, configuration files, or project documentation into a `test` folder.
+- Before any move, produce a dry-run style planned move list and report it first.
+- After any move, verify that key root source files still exist where they started and that minimal compile/import checks still pass.
+- Do not decide that a source file is inactive or unnecessary only because current import search does not show it.
+
 - Keep string/encoding repair separate from feature changes whenever possible.
 - The default user-facing UI language in this repository is Korean.
 - If encoding problems occur, restore execution first, then explicitly verify UI language regressions.

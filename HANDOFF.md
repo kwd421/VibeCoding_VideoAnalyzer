@@ -104,6 +104,12 @@
 - After any string or encoding change, re-run `py_compile`, import, app creation, and a basic UI label check together.
 
 ## Recent gui_app.py Damage Incident
+- During `test` folder cleanup, root `.py` files were accidentally moved because filename-pattern matching was used before confirming file role.
+- Future test cleanup should use an artifact whitelist, keep `.py` files excluded by default, and report the planned move list before anything is moved.
+- User approval should come before executing the actual move operation.
+- Do not treat "not currently found by import search" as proof that a root source file is disposable.
+- Core root source files should stay excluded from test cleanup unless the user explicitly asks otherwise.
+
 - `gui_app.py` recently suffered major damage after an unsafe line-range overwrite edit.
 - Recovery then proceeded from a known-good baseline file rather than guessing from the damaged fragment.
 - Future `gui_app.py` edits must use context-based patching only.
@@ -157,3 +163,65 @@
 ## Current Non-Code Diff Notes
 - Preview subtitle temp files like `temp_preview_A.ass` and `temp_preview_B.ass` can change during normal app usage.
 - Render test artifacts may also appear in the project root during development/testing.
+
+## Refactor Status (2026-03-13)
+- Refactoring stage 1 is partially complete.
+  - Safe modules have been moved under `app/` and `tools/`.
+  - The project is currently in a mixed state: some modules are still at the root, while others are imported from `app.*`.
+- Refactoring stage 2 is also partially complete.
+  - `event_dispatcher.py`, `vision_processor.py`, `video_player.py`, `overlay_manager.py`, and `timeline_manager.py` now live under `app/`.
+- Root runtime files still in place:
+  - `main.py`
+  - `gui_app.py`
+  - `engine_core.py`
+  - `analysis_controller.py`
+  - `video_editor.py`
+  - `ui_block_editor.py`
+- Do not assume that every previously implemented overlay/timeline enhancement is still fully verified after the recovery + refactor sequence.
+
+## Current Verified Runtime Status
+- `py_compile` succeeds for:
+  - `main.py`
+  - `gui_app.py`
+  - `engine_core.py`
+  - `analysis_controller.py`
+  - `video_editor.py`
+  - moved `app/` modules used by the runtime path
+- Import succeeds for:
+  - `main`
+  - `gui_app`
+  - `engine_core`
+  - `analysis_controller`
+  - `video_editor`
+  - moved `app.*` modules currently referenced
+- `CustomModelApp(...)` creation succeeds with a dummy player stub.
+- Minimal runtime path is back to:
+  - compile
+  - import
+  - app create
+  - main-process launch survival
+
+## Current Runtime Problems To Treat As Real
+- Do not trust source search alone for Korean UI recovery.
+- In the most recent real widget-text check, runtime UI still showed mojibake in some places even though parts of the source had already been normalized.
+- Specifically, the latest app-create inspection showed:
+  - notebook tab labels still broken at runtime
+  - `분석 시작` / `작업 중지` equivalent button texts still broken at runtime
+- That means Korean UI is **not fully restored in practice yet**, even if portions of the file look fixed in source form.
+
+## What The Next Session Should Do First
+1. Do **not** add new features first.
+2. Re-verify actual runtime widget text values in `gui_app.py`.
+3. Fix Korean UI at runtime before more overlay/selection bug work.
+4. Re-check the minimum overlay path end-to-end:
+   - image overlay preview
+   - text overlay preview
+   - overlay timeline
+   - export collection
+5. Only after that, continue preview/selection bug fixes.
+
+## Current Bug Queue To Resume After Runtime UI Verification
+1. `ImageOverlay` rotation still looks wrong on the real screen.
+2. Clicking outside after preview-based image selection can still hide/desync the image.
+3. Layer ordering is still unreliable in some multi-image cases.
+4. Preview-based selection clear and timeline-based selection clear do not fully match.

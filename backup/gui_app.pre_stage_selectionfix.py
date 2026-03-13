@@ -12,14 +12,15 @@ import vlc
 from PIL import Image, ImageTk, ImageDraw, ImageFont, ImageOps
 from engine_core import HyperTranscriptionEngine, HAS_WHISPERX
 from video_editor import VideoEditor
-from app.services.video_player import VideoPlayer
-from app.models.config_models import AnalysisSettings
-from app.models.timeline_manager import TranscriptManager
-from app.utils.event_dispatcher import EventEmitter
+from video_player import VideoPlayer
+from config_models import AnalysisSettings
+from config_models import AnalysisSettings
+from timeline_manager import TranscriptManager
+from event_dispatcher import EventEmitter
 from analysis_controller import AnalysisController
 from ui_block_editor import UIBlockEditor
-from app.models.overlay_manager import OverlayManager
-from app.adapters.subtitle_overlay_adapter import build_subtitle_overlays
+from overlay_manager import OverlayManager
+from subtitle_overlay_adapter import build_subtitle_overlays
 
 class LblMarquee(tk.Canvas):
     def __init__(self, parent, text="", font=('Noto Sans KR', 11), fg='#34C759', bg='#FFFFFF', height=30):
@@ -67,14 +68,14 @@ class LblMarquee(tk.Canvas):
             x1 = self.coords(self.text1)[0]
             x2 = self.coords(self.text2)[0]
             
-            gap = 60 # ??용뮞??????揶쏄쑨爰?(??????遺욧퍕???怨뺤뵬 筌욁룓苡?鈺곌퀣??
+            gap = 60 # ?띿뒪???ъ씠 媛꾧꺽 (?ъ슜???붿껌???곕씪 吏㏐쾶 議곗젙)
             
-            # 筌?甕곕뜆????용뮞?硫? ?遺얇늺 ??긱걹??곗쨮 ?袁⑹읈?????筌???甕곕뜆????용뮞????살쨮 獄쏄퀣??
+            # 泥?踰덉㎏ ?띿뒪?멸? ?붾㈃ ?쇱そ?쇰줈 ?꾩쟾???섍?硫???踰덉㎏ ?띿뒪???ㅻ줈 諛곗튂
             if x1 < -tw:
                 self.coords(self.text1, x2 + tw + gap, self.winfo_height()//2)
-            # ??甕곕뜆????용뮞?硫? ?遺얇늺 ??긱걹??곗쨮 ?袁⑹읈?????筌?筌?甕곕뜆????용뮞????살쨮 獄쏄퀣??(?癒?뮉 ?λ뜃由????
+            # ??踰덉㎏ ?띿뒪?멸? ?붾㈃ ?쇱そ?쇰줈 ?꾩쟾???섍?硫?泥?踰덉㎏ ?띿뒪???ㅻ줈 諛곗튂 (?먮뒗 珥덇린????
             if x2 < -tw:
-                if x1 > vw: # ?λ뜃由??怨밴묶
+                if x1 > vw: # 珥덇린 ?곹깭
                     self.coords(self.text2, x1 + tw + gap, self.winfo_height()//2)
                 else:
                     self.coords(self.text2, x1 + tw + gap, self.winfo_height()//2)
@@ -357,10 +358,6 @@ class CustomModelApp:
         self.preview_overlay_window.withdraw()
         self.preview_overlay_window.overrideredirect(True)
         try:
-            self.preview_overlay_window.transient(self.root)
-        except tk.TclError:
-            pass
-        try:
             self.preview_overlay_window.attributes('-transparentcolor', self._overlay_transparent_key)
         except tk.TclError:
             pass
@@ -368,15 +365,12 @@ class CustomModelApp:
             self.preview_overlay_window.attributes('-topmost', True)
         except tk.TclError:
             pass
-        self.preview_overlay_window.configure(bg=self._overlay_transparent_key, takefocus=0)
-        self.preview_overlay_window.bind('<FocusIn>', self._on_preview_overlay_focus_in)
-        self.preview_overlay_canvas = tk.Canvas(self.preview_overlay_window, bg=self._overlay_transparent_key, highlightthickness=0, bd=0, takefocus=0)
+        self.preview_overlay_window.configure(bg=self._overlay_transparent_key)
+        self.preview_overlay_canvas = tk.Canvas(self.preview_overlay_window, bg=self._overlay_transparent_key, highlightthickness=0, bd=0)
         self.preview_overlay_canvas.pack(fill=tk.BOTH, expand=True)
         self.preview_overlay_canvas.bind('<Button-1>', self.on_overlay_press)
         self.preview_overlay_canvas.bind('<B1-Motion>', self.on_overlay_drag)
         self.preview_overlay_canvas.bind('<ButtonRelease-1>', self.on_overlay_release)
-        self.video_frame.bind('<Button-1>', self.on_video_surface_press)
-        self.video_canvas.bind('<Button-1>', self.on_video_surface_press)
         self.overlay_resize_handle = tk.Frame(self.preview_overlay_window, width=10, height=10, bg='#007AFF', cursor='bottom_right_corner')
         self.overlay_resize_handle.place_forget()
         self.overlay_resize_handle.bind('<Button-1>', self.on_overlay_handle_press)
@@ -387,7 +381,7 @@ class CustomModelApp:
         self.overlay_rotate_handle.bind('<Button-1>', self.on_overlay_rotate_press)
         self.overlay_rotate_handle.bind('<B1-Motion>', self.on_overlay_drag)
         self.overlay_rotate_handle.bind('<ButtonRelease-1>', self.on_overlay_release)
-        self.root.bind_all('<Button-1>', self._on_global_pointer_press, add='+')
+        self.video_frame.bind('<Button-1>', lambda e: self.toggle_play())
         def _on_canvas_resize(e):
             self.refresh_overlay_preview()
         self.video_frame.bind("<Configure>", _on_canvas_resize)
@@ -1050,8 +1044,7 @@ class CustomModelApp:
         )
 
     def _get_timeline_items(self):
-        items = self.overlay_manager.get_all_items() + self._get_subtitle_adapter_items()
-        return sorted(items, key=lambda item: (item.track_index, item.layer_index, item.id))
+        return self.overlay_manager.get_all_items() + self._get_subtitle_adapter_items()
 
     def _get_any_overlay_item(self, item_id):
         item = self.overlay_manager.get_item(item_id)
@@ -1448,18 +1441,7 @@ class CustomModelApp:
             'center': (cx, cy),
             'base_rect': (x, y, w, h),
             'corners': corners,
-            'corner_roles': self._get_screen_corner_roles((cx, cy), corners),
             'bbox': bbox,
-        }
-
-    def _get_screen_corner_roles(self, center, corners):
-        ordered = list(corners)
-        return {
-            'top_left': ordered[0],
-            'top_right': ordered[1],
-            'bottom_right': ordered[2],
-            'bottom_left': ordered[3],
-            'ordered': ordered,
         }
 
     def _point_in_polygon(self, x, y, corners):
@@ -1556,16 +1538,14 @@ class CustomModelApp:
                     pass
 
             image_id = self.preview_overlay_canvas.create_image(center_x, center_y, image=photo, anchor='center', tags=('overlay_image', item.id))
-            corner_roles = geom.get('corner_roles', self._get_screen_corner_roles(geom['center'], geom['corners']))
-            ordered_corners = corner_roles['ordered']
             marker_ids = []
             if is_selected:
                 color = '#FF9F0A'
                 flat = []
-                for px, py in ordered_corners + [ordered_corners[0]]:
+                for px, py in geom['corners'] + [geom['corners'][0]]:
                     flat.extend((px, py))
                 marker_ids.append(self.preview_overlay_canvas.create_line(*flat, fill=color, width=2, joinstyle=tk.ROUND, tags=('selection_marker', item.id)))
-                for px, py in ordered_corners:
+                for px, py in geom['corners']:
                     marker_ids.append(
                         self.preview_overlay_canvas.create_oval(
                             px - 1.5, py - 1.5, px + 1.5, py + 1.5,
@@ -1576,8 +1556,7 @@ class CustomModelApp:
                 'image': image_id,
                 'markers': marker_ids,
                 'rect': geom['bbox'],
-                'corners': ordered_corners,
-                'corner_roles': corner_roles,
+                'corners': geom['corners'],
                 'center': geom['center'],
                 'display_size': (display_w, display_h),
             }
@@ -1614,10 +1593,9 @@ class CustomModelApp:
                 refs = self._overlay_canvas_refs.get(selected.id, {})
                 corners = refs.get('corners')
                 center = refs.get('center')
-                corner_roles = refs.get('corner_roles', {})
                 if corners and center:
-                    tr = corner_roles.get('top_right', corners[1])
-                    br = corner_roles.get('bottom_right', corners[2])
+                    tr = corners[1]
+                    br = corners[2]
                     rotate_pt = self._offset_corner_handle(center, tr, 8.0)
                     resize_pt = self._offset_corner_handle(center, br, 5.0)
                     self.overlay_rotate_handle.place(
@@ -1643,75 +1621,6 @@ class CustomModelApp:
         else:
             self.overlay_resize_handle.place_forget()
             self.overlay_rotate_handle.place_forget()
-
-    def _clear_overlay_selection_visuals(self):
-        try:
-            self.preview_overlay_canvas.delete('selection_marker')
-        except tk.TclError:
-            pass
-        self.overlay_resize_handle.place_forget()
-        self.overlay_rotate_handle.place_forget()
-        for item_id, label in list(self._overlay_label_refs.items()):
-            if not label.winfo_exists() or not isinstance(label, tk.Label):
-                continue
-            try:
-                label.configure(highlightthickness=0, bd=0, relief='flat')
-            except tk.TclError:
-                pass
-
-    def _set_selected_overlay(self, item_id, refresh_preview=True, refresh_timeline=True):
-        self.overlay_manager.set_selected(item_id)
-        if refresh_preview:
-            self.refresh_overlay_preview()
-        if refresh_timeline:
-            self.refresh_overlay_timeline()
-        self.refresh_overlay_property_panel()
-
-    def _clear_selected_overlay(self, refresh_preview=True, refresh_timeline=True):
-        self.overlay_manager.set_selected(None)
-        self._overlay_drag = {'item_id': None, 'mode': None, 'start_x': 0, 'start_y': 0, 'origin': None}
-        self._clear_overlay_selection_visuals()
-        if refresh_preview:
-            self.refresh_overlay_preview()
-        if refresh_timeline:
-            self.refresh_overlay_timeline()
-        self.refresh_overlay_property_panel()
-
-    def _on_preview_overlay_focus_in(self, event):
-        try:
-            if self.root.winfo_exists():
-                self.root.after_idle(self.root.focus_force)
-        except tk.TclError:
-            pass
-
-    def on_video_surface_press(self, event):
-        if self.overlay_manager.selected_item_id is None:
-            return
-        self._clear_selected_overlay(refresh_preview=True, refresh_timeline=True)
-        return 'break'
-
-    def _is_overlay_click_widget(self, widget):
-        if widget is None:
-            return False
-        overlay_widgets = {
-            getattr(self, 'preview_overlay_canvas', None),
-            getattr(self, 'overlay_resize_handle', None),
-            getattr(self, 'overlay_rotate_handle', None),
-            getattr(self, 'overlay_timeline_canvas', None),
-        }
-        label_widgets = set(getattr(self, '_overlay_label_refs', {}).values())
-        while widget is not None:
-            if widget in overlay_widgets or widget in label_widgets:
-                return True
-            widget = getattr(widget, 'master', None)
-        return False
-
-    def _on_global_pointer_press(self, event):
-        if self.overlay_manager.selected_item_id is None:
-            return
-        if self._is_overlay_click_widget(getattr(event, 'widget', None)):
-            return
-        self._clear_selected_overlay(refresh_preview=True, refresh_timeline=True)
 
     def _schedule_overlay_prop_refresh(self, delay=80):
         if self._overlay_prop_refresh_job:
@@ -2005,11 +1914,11 @@ class CustomModelApp:
         hits = self._hit_overlay_timeline_items(canvas_x, event.y)
         item_id, mode = self._pick_overlay_timeline_hit(hits, canvas_x, event.y, advance=shift_pressed or len(hits) > 1)
         if not item_id:
-            self._clear_selected_overlay(refresh_preview=True, refresh_timeline=True)
             return
         item = self._get_any_overlay_item(item_id)
         if item is None:
             return
+        self.overlay_manager.set_selected(item_id)
         press_time = self._timeline_x_to_time(canvas_x)
         self._overlay_timeline_drag = {
             'item_id': item_id,
@@ -2018,7 +1927,9 @@ class CustomModelApp:
             'origin_start': item.start_time,
             'origin_end': item.end_time,
         }
-        self._set_selected_overlay(item_id, refresh_preview=True, refresh_timeline=True)
+        self.refresh_overlay_preview()
+        self.refresh_overlay_timeline()
+        self.refresh_overlay_property_panel()
 
     def on_overlay_timeline_drag(self, event):
         item_id = self._overlay_timeline_drag.get('item_id')
@@ -2128,6 +2039,7 @@ class CustomModelApp:
         item = self._get_any_overlay_item(item_id)
         if item is None:
             return
+        self.overlay_manager.set_selected(item_id)
         self._overlay_drag = {
             'item_id': item_id,
             'mode': 'move',
@@ -2135,16 +2047,21 @@ class CustomModelApp:
             'start_y': event.y_root,
             'origin': (item.x, item.y, item.width, item.height),
         }
-        self._set_selected_overlay(item_id, refresh_preview=True, refresh_timeline=True)
+        self.refresh_overlay_preview()
+        self.refresh_overlay_timeline()
+        self.refresh_overlay_property_panel()
 
     def on_overlay_press(self, event):
         mode, item_id = self._find_overlay_hit(event.x, event.y)
         if not item_id:
-            self._clear_selected_overlay(refresh_preview=True, refresh_timeline=True)
+            self.overlay_manager.set_selected(None)
+            self.refresh_overlay_preview()
+            self.refresh_overlay_property_panel()
             return
         item = self._get_any_overlay_item(item_id)
         if item is None:
             return
+        self.overlay_manager.set_selected(item_id)
         self._overlay_drag = {
             'item_id': item_id,
             'mode': mode,
@@ -2152,7 +2069,9 @@ class CustomModelApp:
             'start_y': event.y_root,
             'origin': (item.x, item.y, item.width, item.height),
         }
-        self._set_selected_overlay(item_id, refresh_preview=True, refresh_timeline=True)
+        self.refresh_overlay_preview()
+        self.refresh_overlay_timeline()
+        self.refresh_overlay_property_panel()
 
     def on_overlay_drag(self, event):
         item_id = self._overlay_drag.get('item_id')
@@ -2168,7 +2087,7 @@ class CustomModelApp:
         if self._overlay_drag['mode'] == 'rotate':
             cx, cy = self._overlay_drag['center_root']
             current_angle = math.degrees(math.atan2(event.y_root - cy, event.x_root - cx))
-            item.rotation = self._overlay_drag['origin_rotation'] - (current_angle - self._overlay_drag['start_angle'])
+            item.rotation = self._overlay_drag['origin_rotation'] + (current_angle - self._overlay_drag['start_angle'])
             self._invalidate_overlay_preview_cache(item.id)
             rect = self._update_overlay_label(item, preview_w, preview_h, draft=False)
             if item.id == self.overlay_manager.selected_item_id:
@@ -2252,19 +2171,19 @@ class CustomModelApp:
 
 
     def on_stop_action(self):
-        if self.stop_event and not self.stop_event.is_set():
+        if self.stop_event and not self.stop_event.is_set(): 
             self.stop_event.set()
-        self.lbl_status.config(text='진행 중인 작업을 중지하는 중...', fg=self.C['red'])
-        self.btn_stop.configure(state=tk.DISABLED)
-        self.root.after(1500, lambda: self.reset_action_button() or self.lbl_status.config(text='작업이 중지되었습니다.', fg=self.C['red']))
-
+            # ?먮? ?꾩쟾 利앸컻 ?쒗궗 ?꾩슂媛 ?놁뼱吏?(?대깽??援щ룆 援ъ“?대?濡?stop_event媛 set?섎㈃ 而⑦듃濡ㅻ윭媛 諛쒖넚 以묐떒??
+            self.lbl_status.config(text="진행 중인 작업을 중지하는 중...", fg=self.C['red'])
+            self.btn_stop.configure(state=tk.DISABLED)
+            self.root.after(1500, lambda: self.reset_action_button() or self.lbl_status.config(text="작업이 중지되었습니다.", fg=self.C['red']))
 
     def on_start_analysis(self):
         mode = self.mode_var.get()
         selected_model = self.ai_model_var.get().split(" ")[0]
         self.engine.set_model_id(selected_model)
         
-        # [??뺣빍???곕떽?] ?브쑴苑???????륁춿
+        # [?쒕땲??異붽?] 遺꾩꽍 ?듭뀡 ?섏쭛
         try: min_sil_ms, pad_ms = int(self.silence_dur_var.get() * 1000), int(self.speech_pad_var.get() * 1000)
         except: min_sil_ms, pad_ms = 2000, 250
         
@@ -2296,7 +2215,7 @@ class CustomModelApp:
         self.stop_event = threading.Event(); self.btn_analyze.configure(state=tk.DISABLED); self.btn_stop.configure(state=tk.NORMAL); self.progress_var.set(0); self.results_data = []
         for i in self.tree.get_children(): self.tree.delete(i)
         
-        # ?뚢뫂?껅에?살쑎???臾믩씜 ???
+        # 而⑦듃濡ㅻ윭???묒뾽 ?닿?
         max_chars = self.max_len_int.get()
         threading.Thread(target=self.controller.run_analysis, args=(self.current_video_path, self.stop_event, mode, min_sil_ms, pad_ms, max_chars, analysis_options), daemon=True).start()
 
@@ -2348,19 +2267,20 @@ class CustomModelApp:
             for b in [self.btn_fast_save, self.btn_pro_save]: b.configure(state=tk.DISABLED)
             self.btn_stop.configure(state=tk.NORMAL); self.progress_var.set(0)
             
-            # burn ??? ASS ?? ??
+            # [?쒕땲?? ?먮쭑 ?⑹튂湲?Burn) ?듭뀡 泥섎━
             ass_path_final = None
             if self.use_burn_sub_var.get():
                 try:
+                    # 1. 蹂묓빀 ?멸렇癒쇳듃 ?뺣낫 怨꾩궛
                     merged, _ = self.video_editor.get_merged_segments_info(self.results_data)
-
+                    
+                    # 2. ASS ?ㅽ????ㅻ뜑 ?뺣낫 ?섏쭛 (apply_preview_subtitles 濡쒖쭅 ?ъ궗??
+                    # --- HEX(#RRGGBB) ??ASS(&H00BBGGRR&) 蹂??---
                     def hex_to_ass(hex_color):
                         hex_color = hex_color.lstrip('#')
-                        r = int(hex_color[0:2], 16)
-                        g = int(hex_color[2:4], 16)
-                        b = int(hex_color[4:6], 16)
+                        r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
                         return f"&H00{b:02X}{g:02X}{r:02X}&"
-
+                    
                     font_name = self.sub_font.get() if hasattr(self, 'sub_font') else '留묒? 怨좊뵓'
                     font_size = self.sub_font_size.get() if hasattr(self, 'sub_font_size') else 40
                     ass_primary = hex_to_ass(self.sub_color_f.get() if hasattr(self, 'sub_color_f') else '#ffffff')
@@ -2369,59 +2289,38 @@ class CustomModelApp:
                     outline_w = self.sub_outline.get() if hasattr(self, 'sub_outline') else 3
                     shadow_w = self.sub_shadow.get() if hasattr(self, 'sub_shadow') else 3
                     margin_v = self.sub_y_pos.get() if hasattr(self, 'sub_y_pos') else 50
-
-                    ass_header = f'''[Script Info]
-Title: Export
-ScriptType: v4.00+
-PlayResX: 1920
-PlayResY: 1080
-WrapStyle: 0
-ScaledBorderAndShadow: yes
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font_name},{font_size},{ass_primary},&H000000FF&,{ass_outline},{ass_shadow},-1,0,0,0,100,100,0,0,1,{outline_w},{shadow_w},2,10,10,{margin_v},1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-'''
-
+                    
+                    ass_header = f"""[Script Info]\nTitle: Export\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,{font_name},{font_size},{ass_primary},&H000000FF&,{ass_outline},{ass_shadow},-1,0,0,0,100,100,0,0,1,{outline_w},{shadow_w},2,10,10,{margin_v},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"""
+                    
                     def fmt_ass_time(sec):
-                        h = int(sec // 3600)
-                        m = int((sec % 3600) // 60)
-                        s = int(sec % 60)
-                        cs = int((sec % 1) * 100)
+                        h, m, s, cs = int(sec//3600), int((sec%3600)//60), int(sec%60), int((sec%1)*100)
                         return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
-                    # ?? ?? ??? filler ??
-                    _FILLERS = {'?', '?', '?', '??', '?', '??', '?', '?', '?'}
-
+                    # ?꾨윭 泥섎━ 濡쒖쭅 (apply_preview_subtitles ??異붽???寃껉낵 ?숈씪)
+                    _FILLERS = {'음', '어', '아', '어어', '그', '그냥', '뭐', '막', '좀'}
                     def _get_display_start(r):
                         words = r.get('words', [])
-                        if not words:
-                            return r['s']
+                        if not words: return r['s']
                         for w in words:
                             wt = w['word'].strip() if isinstance(w, dict) else w.word.strip()
                             wclean = wt.replace(' ', '').replace('.', '').replace(',', '').replace('-', '').replace('~', '')
-                            if not wclean:
-                                continue
-                            if wclean in _FILLERS or (len(wclean) <= 3 and len(set(wclean)) <= 1):
-                                continue
+                            if not wclean: continue
+                            if wclean in _FILLERS or (len(wclean) <= 3 and len(set(wclean)) <= 1): continue
                             ws = w['s'] if isinstance(w, dict) else w.s
-                            if ws - r['s'] > 1.5:
-                                return r['s']
+                            if ws - r['s'] > 1.5: return r['s']
                             return ws
                         return r['s']
 
+                    # 3. ??꾨씪??留ㅽ븨 (Cut ?곸긽??留욊쾶 ?먮쭑 ?쒓컙 ?대룞)
                     lines = []
                     current_out_time = 0.0
                     for m_start, m_end in merged:
                         for r in self.results_data:
+                            # ?멸렇癒쇳듃媛 ??蹂묓빀 援ш컙 ?덉뿉 ?덈뒗吏 ?뺤씤
                             if r['s'] >= m_start - 0.001 and r['e'] <= m_end + 0.001:
-                                rel_s = _get_display_start(r) - m_start
+                                rel_s = _get_display_start(r) - m_start # ?꾨윭 蹂댁젙 ?ы븿
                                 rel_e = r['e'] - m_start
-                                s_out = current_out_time + rel_s
-                                e_out = current_out_time + rel_e
+                                s_out, e_out = current_out_time + rel_s, current_out_time + rel_e
                                 lines.append(f"Dialogue: 0,{fmt_ass_time(s_out)},{fmt_ass_time(e_out)},Default,,0,0,0,,{r['t']}")
                         current_out_time += (m_end - m_start)
 
@@ -2457,11 +2356,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     self._open_editor(item, x, y, max(w, 200), max(h, 20), e.x - x)
             else:
                 try:
-                    # ??뽰삂 ??볦퍢 ????#2) vs ?ル굝利???볦퍢 ????#3) ?브쑨由?筌ｌ꼶??
+                    # ?쒖옉 ?쒓컙 ?대┃(#2) vs 醫낅즺 ?쒓컙 ?대┃(#3) 遺꾧린 泥섎━
                     if col == '#3': t_sec = self.parse_time(val[2])
                     else: t_sec = self.parse_time(val[1])
                     self.player.set_time(int(t_sec * 1000))
-                except Exception as e: print(f'[WARN] ?紐꺿봺 ??????볦퍢 ??猷???살첒: {e}')
+                except Exception as e: print(f'[WARN] ?몃━ ?대┃ ?쒓컙 ?대룞 ?ㅻ쪟: {e}')
             
     def edit_selected_text(self):
         sel = self.tree.selection()
@@ -2474,10 +2373,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 
     def rebuild_tree_and_render(self, fast=False):
-        # [??뺣빍??筌ㅼ뮇??? Treeview 揶쏄퉮??? ?겸뫖?????쥓?ㅿ쭪?筌? Canvas ?袁⑷퍥 ????遺얠춦?? ?얜떯苡??щ빍??
-        # Ctrl+??鈺곌퀣????뽯퓠??fast=True????띻볼 Treeview筌?揶쏄퉮???몃빍??
+        # [?쒕땲??理쒖쟻?? Treeview 媛깆떊? 異⑸텇??鍮좊Ⅴ吏留? Canvas ?꾩껜 ?щ옖?붾쭅? 臾닿쾪?듬땲??
+        # Ctrl+??議곗젅 ?쒖뿉??fast=True瑜??섍꺼 Treeview留?媛깆떊?⑸땲??
         
-        # ?袁⑹삺 ?醫뤾문???袁⑹뵠??疫꿸퀣堉?(??쎄쾿嚥??醫????袁る맙)
+        # ?꾩옱 ?좏깮???꾩씠??湲곗뼲 (?ㅽ겕濡??좎?瑜??꾪븿)
         selected_idx = -1
         sel = self.tree.selection()
         if sel:
@@ -2488,7 +2387,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         for i, r in enumerate(self.results_data):
             self.tree.insert("", "end", values=(i+1, self.format_time(r.get('s',0)), self.format_time(r.get('e',0)), r.get('t','')))
         
-        # ?醫뤾문 ?怨밴묶 癰귣벀??
+        # ?좏깮 ?곹깭 蹂듦뎄
         if selected_idx != -1:
             for item in self.tree.get_children():
                 if int(self.tree.item(item)['values'][0]) - 1 == selected_idx:
@@ -2496,7 +2395,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     break
 
         if not fast:
-            # [??????遺욧퍕] ??λ선 ?됰뗀以???0甕??????춸 筌띾뜄苡울쭪?筌?뗀苡???귐뗫늄??됰뻻 ??묐뻬 (?源낅뮟 ??됰튋)
+            # [?ъ슜???붿껌] ?⑥뼱 釉붾줉 ??0踰????뚮쭔 留덈쾿吏?罹붾쾭??由ы봽?덉떆 ?섑뻾 (?깅뒫 ?덉빟)
             if getattr(self, "notebook", None) and self.notebook.index(self.notebook.select()) == 0:
                 self.block_editor.render_block_view()
         
@@ -2514,7 +2413,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         entry.insert(0, text)
         entry.focus()
 
-        # [??뺣빍??筌ㅼ뮇??? ????癒? ?????x ?ル슦紐당몴??④쑴沅??뤿연 ????疫꼲????????뚣끉苑???곌때
+        # [?쒕땲??理쒖쟻?? ?ъ슜?먭? ?대┃??x 醫뚰몴瑜?怨꾩궛?섏뿬 ?대떦 湲???ъ씠??而ㅼ꽌 ?뚰궧
         if click_x is not None:
             def _set_cursor():
                 idx = entry.index(f"@{max(0, click_x)}")
@@ -2523,7 +2422,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         else:
             entry.selection_range(0, tk.END)
 
-        # [??뺣빍??筌뤴뫁???紐껋삋?? ??쎄쾿嚥?????용뮞????낆젾筌≪럩???癒?궚 ?? ?袁⑺뒄????쇰뻻揶쏄쑴?앮에??怨뺤뵬揶쎛?袁⑥쨯 ?곕뗄??
+        # [?쒕땲??紐⑥뀡 ?몃옒?? ?ㅽ겕濡????띿뒪???낅젰李쎌씠 ?먮낯 ? ?꾩튂瑜??ㅼ떆媛꾩쑝濡??곕씪媛?꾨줉 異붿쟻
         def _track_position():
             if not entry.winfo_exists(): return
             if not self.tree.exists(item):
@@ -2534,12 +2433,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     nx, ny, nw, nh = bbox
                     entry.place(x=nx, y=ny, width=max(nw, 200), height=max(nh, 20))
                 else:
-                    entry.place(x=-9999, y=-9999) # ?遺얇늺 獄쏅쉼?앮에???쎄쾿嚥????袁⑸뻻 ??? 筌ｌ꼶??
+                    entry.place(x=-9999, y=-9999) # ?붾㈃ 諛뽰쑝濡??ㅽ겕濡????꾩떆 ?④? 泥섎━
             self.root.after(15, _track_position)
         
         _track_position()
 
-        # [??뺣빍??筌ㅼ뮇??? ??쇰뻻揶?????꾨릅 獄쏆꼷??(Debounced)
+        # [?쒕땲??理쒖쟻?? ?ㅼ떆媛???댄븨 諛섏쁺 (Debounced)
         def _on_key_release(event):
             if event.keysym in ['Return', 'Escape']: return
             if hasattr(self, '_edit_debounce_timer') and self._edit_debounce_timer:
@@ -2556,7 +2455,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             if old_text != new_text:
                 self.transcript_manager.save_state()
                 self.results_data[target_idx]['t'] = new_text
-                # [??뺣빍??筌ㅼ뮇??? ??용뮞????륁젟 獄쏆뮇源???疫꿸퀣????λ선 ?됰뗀以?獄쏄퀣肉? ???뇵?????퉸 ?? 筌욊쑴?????癒?짗 ?브쑵釉???????醫딅즲
+                # [?쒕땲??理쒖쟻?? ?띿뒪???섏젙 諛쒖깮 ??湲곗〈 ?⑥뼱 釉붾줉(諛곗뿴) ?뚯뇙瑜??듯빐 ?? 吏꾩엯 ???먮룞 遺꾪븷 ?ш퀎???좊룄
                 self.results_data[target_idx].pop('words', None)
                 self.apply_preview_subtitles(force_reload=True)
             
@@ -2586,18 +2485,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         item = self.tree.identify_row(e.y)
         if item: self.tree.selection_set(item); self.menu.post(e.x_root, e.y_root)
     def apply_preview_subtitles(self, force_reload=False):
-        """ASS ??? ?? ??? ???? VLC? ?? ????."""
+        """[ASS ?レ뒪?? ?ъ슜???붿옄???ㅼ젙??諛섏쁺??ASS ?뚯씪???숈쟻 ?앹꽦?섏뿬 VLC??二쇱엯"""
         if not self.results_data or not self.player: return
         try:
-            # HEX(#RRGGBB) -> ASS(&H00BBGGRR&) ??
+            # --- HEX(#RRGGBB) ??ASS(&H00BBGGRR&) 蹂??---
             def hex_to_ass(hex_color):
                 hex_color = hex_color.lstrip('#')
                 r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
                 return f"&H00{b:02X}{g:02X}{r:02X}&"
             
-            # ?? UI ??? ??
+            # --- ?ъ슜??UI ?ㅼ젙媛??섏쭛 ---
             font_name = getattr(self, 'sub_font', None)
-            font_name = font_name.get() if font_name else '?? ??'
+            font_name = font_name.get() if font_name else '留묒? 怨좊뵓'
             font_size = getattr(self, 'sub_font_size', None)
             font_size = font_size.get() if font_size else 40
             color_f = getattr(self, 'sub_color_f', None)
@@ -2617,7 +2516,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             ass_outline = hex_to_ass(color_o)
             ass_shadow = hex_to_ass(color_s)
             
-            # --- ASS ??삳쐭 ?臾믨쉐 ---
+            # --- ASS ?ㅻ뜑 ?묒꽦 ---
             ass_header = f"""[Script Info]
 Title: VAD AI Studio Preview
 ScriptType: v4.00+
@@ -2633,7 +2532,7 @@ Style: Default,{font_name},{font_size},{ass_primary},&H000000FF&,{ass_outline},{
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-            # --- ASS ??볦퍢 ????H:MM:SS.cs ---
+            # --- ASS ?쒓컙 ?щ㎎ H:MM:SS.cs ---
             def fmt_ass_time(sec):
                 h = int(sec // 3600)
                 m = int((sec % 3600) // 60)
@@ -2641,7 +2540,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 cs = int((sec % 1) * 100)
                 return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
             
-            _FILLERS = {'?', '?', '?', '??', '?', '??', '?', '?', '?'}
+            _FILLERS = {'음', '어', '아', '어어', '그', '그냥', '뭐', '막', '좀'}
 
             def _get_display_start(r):
                 """Return a stable display start time for preview/export."""
@@ -2649,18 +2548,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 if not words:
                     return r['s']
                 for w in words:
-                    # words? dict ?? dataclass ?? ?? ??
+                    # words ??ぉ? dict ?먮뒗 dataclass ???뺥깭媛 ?쇱옱?섎?濡?????泥섎━
                     wt = w['word'].strip() if isinstance(w, dict) else w.word.strip()
-                    # Whisper filler ??? ?? ???? ??
+                    # [?쒕땲?? Whisper ?뱀쑀??臾몄옣遺??--, ...) 諛?怨듬갚 ?쒓굅
                     wclean = wt.replace(' ', '').replace('.', '').replace(',', '').replace('-', '').replace('~', '')
                     if not wclean: continue
                     
-                    # ?袁⑥쑎 ??λ선??욧탢??1~3疫꼲??獄쏆꼶????곷선, ??곷선????????椰꾨?瑗??
+                    # ?꾨윭 ?⑥뼱?닿굅??1~3湲??諛섎났(?댁뼱, ?댁뼱?????대㈃ 嫄대꼫??
                     if wclean in _FILLERS or (len(wclean) <= 3 and len(set(wclean)) <= 1):
                         continue
                         
                     ws = w['s'] if isinstance(w, dict) else w.s
-                    # ?硫몃젃?믪눛????뽰삂癰귣???1.5????곴맒 ???앾쭖??癒?궚 ?醫? (??댭???苡???ㅻ뮉 野?獄쎻뫗?)
+                    # ?멸렇癒쇳듃 ?쒖옉蹂대떎 1.5珥??댁긽 ??쑝硫??먮낯 ?좎? (?덈Т ??쾶 ?⑤뒗 寃?諛⑹?)
                     if ws - r['s'] > 1.5:
                         return r['s']
                     return ws
@@ -2668,13 +2567,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
             lines = []
             for i, r in enumerate(self.results_data):
-                s_r = _get_display_start(r)  # ??쇱젫 ??λ선 疫꿸퀣? ??뽯뻻 ??뽰삂??
+                s_r = _get_display_start(r)  # ?ㅼ젣 ?⑥뼱 湲곗? ?쒖떆 ?쒖옉??
                 e_r = r['e']
                 if i < len(self.results_data) - 1 and e_r >= self.results_data[i+1]['s']:
                     e_r = max(s_r + 0.1, self.results_data[i+1]['s'] - 0.05)
                 lines.append(f"Dialogue: 0,{fmt_ass_time(s_r)},{fmt_ass_time(e_r)},Default,,0,0,0,,{r['t']}")
             
-            # --- A/B ?臾볥렜 ??щ뮞??---
+            # --- A/B ?묓뎮 ?レ뒪??---
             suffix = "A" if getattr(self, '_ping_pong', False) else "B"
             self._ping_pong = not getattr(self, '_ping_pong', False)
             _script_dir = self.base_dir
@@ -2688,14 +2587,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             self.preview_srt_path = ass_name
             self.player.set_subtitle(ass_name)
             
-            # [??뺣빍??筌ㅼ뮇??? ??깅뻻?類? ?怨밴묶??????뽰쁽???癒곕늄嚥??袁⑥쟿????덉쨮?⑥쥙臾?
+            # [?쒕땲??理쒖쟻?? ?쇱떆?뺤? ?곹깭?????쒖옄由??먰봽濡??꾨젅???덈줈怨좎묠
             if force_reload and not self.player.is_playing():
                 curr = self.player.get_time()
                 if curr >= 0:
                     self.player.set_time(curr)
         except Exception as e:
             import traceback; traceback.print_exc()
-            print(f'[ERROR] apply_preview_subtitles ??쎈솭: {e}')
+            print(f'[ERROR] apply_preview_subtitles ?ㅽ뙣: {e}')
     def toggle_play(self):
         if self.player: is_p = self.player.toggle_play(); self.btn_play.config(text='일시정지' if is_p else '재생')
     def skip_time(self, ms): 
@@ -2706,7 +2605,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if self.player:
             self.player.set_mute(True)
             if not self._was_playing_before_seek:
-                self.player.toggle_play() # 揶쏅벡??揶쏄퉮????袁る퉸 ??源???뽰삂
+                self.player.toggle_play() # 媛뺤젣 媛깆떊???꾪빐 ?ъ깮 ?쒖옉
         self._update_seek_from_mouse(e)
     def on_seek_motion(self, e):
         if self.is_seeking: self._update_seek_from_mouse(e)
@@ -2715,10 +2614,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         self.is_seeking = False
         if self.player:
             if getattr(self, '_was_playing_before_seek', False):
-                self.player.play() # ?癒?삋 ??源??怨밴묶????삠늺 ??源?
+                self.player.play() # ?먮옒 ?ъ깮 ?곹깭??ㅻ㈃ ?ъ깮
             else:
-                self.player.pause() # ?癒?삋 ??깅뻻?類? ?怨밴묶????삠늺 ?類?
-            # 筌앸맩??獒뺛끋????곸젫 ?????봺揶쎛 ??????됰선 ??꾩퍢????뺤쟿??
+                self.player.pause() # ?먮옒 ?쇱떆?뺤? ?곹깭??ㅻ㈃ ?뺤?
+            # 利됱떆 裕ㅽ듃 ?댁젣 ???뚮━媛 ?????덉뼱 ?쎄컙???쒕젅??
             self.root.after(100, lambda: self.player.set_mute(False) if self.player else None)
     def _update_seek_from_mouse(self, e):
         try:
@@ -2727,7 +2626,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 pos = max(0.0, min(1.0, e.x / w))
                 self.player.set_position(pos)
                 self.seek_var.set(pos * 1000)
-        except Exception as e: print(f'[WARN] ??쀪쾿獄???猷???살첒: {e}')
+        except Exception as e: print(f'[WARN] ?쒗겕諛??대룞 ?ㅻ쪟: {e}')
 
 
     def update_loop(self):
@@ -2738,7 +2637,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             curr_ms = self.player.get_time()
             total_ms = self.player.get_length()
             
-            # [??뺣빍??筌ㅼ뮇??? VLC ?????????곴맒????볧???250ms) 域밸갭????袁る립 ???뵠????? 獄쎛?귐딇겧(High-Precision) ?袁⑥쟿??癰귣떯而?
+            # [?쒕땲??理쒖쟻?? VLC ??대㉧???댁긽???쒓퀎(??250ms) 洹밸났???꾪븳 ?뚯씠???대? 諛由ъ큹(High-Precision) ?꾨젅??蹂닿컙
             import time
             if not hasattr(self, '_last_vlc_ms'):
                 self._last_vlc_ms = curr_ms
@@ -2759,7 +2658,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 self._refresh_overlay_time_state(curr_ms / 1000.0)
                 self._update_overlay_timeline_playhead()
                 
-                # [??????遺욧퍕] ?袁⑹삺 ??源?餓λ쵐???癒?춵 筌≪뼐由?獄?揶쏅벡??(??곸젫 ?λ뜆?숃쳸? ??볧?????
+                # [?ъ슜???붿껌] ?꾩옱 ?ъ깮 以묒씤 ?먮쭑 李얘린 諛?媛뺤“ (?댁젣 珥덉젙諛 ?쒓퀎 ?ъ슜)
                 curr_sec = self._smooth_ms / 1000.0
                 active_idx = -1
                 for i, r in enumerate(self.results_data):
@@ -2770,27 +2669,27 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 if hasattr(self, '_last_active_idx') and self._last_active_idx != active_idx:
                     current_tab = self.notebook.index(self.notebook.select())
                     
-                    # Treeview 揶쏅벡??
+                    # Treeview 媛뺤“
                     for item in self.tree.get_children():
                         val = self.tree.item(item)['values']
                         if val and int(val[0]) - 1 == active_idx:
                             self.tree.item(item, tags=('active',))
-                            if current_tab == 1: self.tree.see(item) # ?癒?춵 ?귐딅뮞?????????춸 ??쎄쾿嚥?
+                            if current_tab == 1: self.tree.see(item) # ?먮쭑 由ъ뒪????씪 ?뚮쭔 ?ㅽ겕濡?
                         else:
                             self.tree.item(item, tags=())
                     
-                    # ??λ선 ?됰뗀以?揶쏅벡??(??쎄쾿嚥▲끉? ??? 筌롫뗄苑??뽯퓠?????類ㅼ뵥 ????묐뻬)
+                    # ?⑥뼱 釉붾줉 媛뺤“ (?ㅽ겕濡ㅼ? ?대? 硫붿꽌?쒖뿉?????뺤씤 ???섑뻾)
                     self.block_editor.set_active_row(active_idx, follow= (current_tab == 0))
                     self._last_active_idx = active_idx
                 elif not hasattr(self, '_last_active_idx'):
-                    self._last_active_idx = -2 # ?λ뜃由??
+                    self._last_active_idx = -2 # 珥덇린??
 
                 if hasattr(self, 'block_editor'):
                     self.block_editor.set_active_time(curr_sec)
 
             if hasattr(self, 'btn_play'): self.btn_play.config(text='일시정지' if self.player.is_playing() else '재생')
         
-        # ??쇰뻻揶쏄쑴苑??關湲???袁る퉸 16ms 雅뚯눊由경에?癰궰野?(?λ뜄??~60?袁⑥쟿??
+        # ?ㅼ떆媛꾩꽦 ?μ긽???꾪빐 16ms 二쇨린濡?蹂寃?(珥덈떦 ~60?꾨젅??
         self.root.after(16, self.update_loop)
     def export_subtitles(self):
         if not self.results_data: return
@@ -2823,8 +2722,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     writer.writerow(["Index", "Start", "End", "Text"])
                     for i, r in enumerate(self.results_data):
                         writer.writerow([i+1, r['s'], r['e'], r['t']])
-            messagebox.showinfo('?꾨즺', '??λ릺?덉뒿?덈떎.')
-
+            messagebox.showinfo('완료', '저장되었습니다.')
 
 
 

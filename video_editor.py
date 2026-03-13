@@ -5,7 +5,7 @@ import re
 import imageio_ffmpeg
 from typing import List, Dict, Tuple, Optional, Callable
 from PIL import Image
-from text_overlay_utils import render_text_overlay_image
+from app.utils.text_overlay_utils import render_text_overlay_image
 
 class VideoEditor:
     """비디오 편집 엔진 (Match Source, Stream Copy 및 프리미어/리졸브 완벽 호환 XML 지원)"""

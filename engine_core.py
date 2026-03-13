@@ -18,10 +18,10 @@ from faster_whisper import WhisperModel
 from silero_vad import load_silero_vad, get_speech_timestamps
 import imageio_ffmpeg
 import concurrent.futures
-from config_models import AnalysisSettings, TranscriptSegment, TranscriptWord
-from text_sanitizer import TextSanitizer
-from audio_processor import AudioProcessor
-from vision_processor import VisionProcessor
+from app.models.config_models import AnalysisSettings, TranscriptSegment, TranscriptWord
+from app.processors.text_sanitizer import TextSanitizer
+from app.processors.audio_processor import AudioProcessor
+from app.services.vision_processor import VisionProcessor
 # [시니어] WhisperX 정밀 정렬 (Optional Dependency)
 try:
     import whisperx

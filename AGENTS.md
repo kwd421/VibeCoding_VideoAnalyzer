@@ -45,6 +45,15 @@
 - If file size drops unexpectedly, key classes/functions disappear, or the main structure looks damaged, stop immediately and report the damage instead of continuing.
 
 ## High-Risk Edit Verification Rules
+- Never move root-level `.py` files based only on name patterns during test artifact cleanup.
+- Treat test cleanup as an artifact-only task by default.
+- Select cleanup targets from a whitelist of expected outputs such as rendered media, extracted frames, temporary overlay assets, or other disposable artifacts.
+- Before moving anything, print the planned move list and get user confirmation.
+- If the planned move list contains any `.py`, `.md`, configuration file, or project documentation file, stop automatically and report it instead of proceeding.
+- After cleanup, verify that key source files remain in their original locations before using import search as a signal.
+- After cleanup, run at least a minimal root source-presence check plus `py_compile` or import verification.
+- Do not assume a file is inactive or disposable only because current import search does not surface it.
+
 - Run an immediate integrity check after large-file edits.
 - Do not report "fixed" or "completed" until post-edit verification has actually passed.
 - When a known-good recovery baseline exists, recover from that baseline instead of guessing from a damaged file fragment.
