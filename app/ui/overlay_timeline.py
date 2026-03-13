@@ -7,7 +7,7 @@ def refresh_overlay_timeline(self):
     self._overlay_timeline_regions = {}
     visible_width = max(400, canvas.winfo_width())
     width = self._get_overlay_timeline_content_width(visible_width)
-    row_h = 34
+    row_h = 40
     ruler_h = 24
     top_pad = 10
     total_duration = self._get_overlay_timeline_total_duration()
@@ -18,16 +18,13 @@ def refresh_overlay_timeline(self):
     self._draw_overlay_timeline_ruler(total_duration, width, ruler_h)
     for track_idx, track_name, track_items in track_specs:
         y1 = top_pad + ruler_h + track_idx * row_h
-        y2 = y1 + 24
-        canvas.create_text(10, y1 + 12, text=track_name, anchor='w', fill=self.C['text2'], font=('Noto Sans KR', 10))
+        y2 = y1 + 30
+        canvas.create_text(10, y1 + 15, text=track_name, anchor='w', fill=self.C['text2'], font=('Noto Sans KR', 10))
         for item in track_items:
             x1 = self._time_to_timeline_x(item.start_time, total_duration, width)
             x2 = self._time_to_timeline_x(item.end_time, total_duration, width)
             x2 = max(x1 + 18, x2)
             is_selected = item.id == self.overlay_manager.selected_item_id
-            fill = '#0A84FF' if is_selected else ('#5AC8FA' if item.visible else '#8E8E93')
-            outline = '#FFFFFF' if is_selected else ''
-            rect_id = canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline=outline, width=1, tags=(item.id, 'overlay_item'))
             style_map = {
                 'video': ('VID', '#34C759'),
                 'image': ('IMG', '#5AC8FA'),
@@ -37,14 +34,31 @@ def refresh_overlay_timeline(self):
             }
             tag_name, base_fill = style_map.get(item.type, ('ITM', '#8E8E93'))
             fill = '#0A84FF' if is_selected else (base_fill if item.visible else '#8E8E93')
-            canvas.itemconfigure(rect_id, fill=fill, outline=outline, width=1)
+            outline = '#FFFFFF' if is_selected else '#4A4A4F'
+            rect_id = canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline=outline, width=2 if is_selected else 1, tags=(item.id, 'overlay_item'))
+            handle_w = min(10, max(6, int((x2 - x1) / 5)))
+            handle_fill = '#2E5266' if is_selected else '#233B4D'
+            handle_outline = '#FFFFFF' if is_selected else '#172733'
+            left_x2 = min(x2, x1 + handle_w)
+            right_x1 = max(x1, x2 - handle_w)
+            canvas.create_rectangle(x1, y1, left_x2, y2, fill=handle_fill, outline=handle_outline, width=1, tags=(item.id, 'overlay_item', 'trim_left_handle'))
+            canvas.create_rectangle(right_x1, y1, x2, y2, fill=handle_fill, outline=handle_outline, width=1, tags=(item.id, 'overlay_item', 'trim_right_handle'))
+            divider_color = '#FFFFFF' if is_selected else '#172733'
+            canvas.create_line(left_x2, y1 + 2, left_x2, y2 - 2, fill=divider_color, width=1, tags=(item.id, 'overlay_item'))
+            canvas.create_line(right_x1, y1 + 2, right_x1, y2 - 2, fill=divider_color, width=1, tags=(item.id, 'overlay_item'))
+            grip_color = '#F7FBFF' if is_selected else '#DCE7EF'
+            left_mid = x1 + handle_w / 2.0
+            right_mid = x2 - handle_w / 2.0
+            for grip_x in (left_mid, right_mid):
+                canvas.create_line(grip_x - 1, y1 + 7, grip_x - 1, y2 - 7, fill=grip_color, width=1, tags=(item.id, 'overlay_item'))
+                canvas.create_line(grip_x + 1, y1 + 7, grip_x + 1, y2 - 7, fill=grip_color, width=1, tags=(item.id, 'overlay_item'))
             label_text = (item.text or item.source or '').strip() if item.type in ('audio', 'video') else ''
             if label_text:
                 label = f'{tag_name} {os.path.basename(label_text)}'
             else:
                 label = f'{tag_name} {item.layer_index}' if item.visible else f'{tag_name} {item.layer_index} OFF'
             text_fill = 'white' if item.visible else '#E5E5EA'
-            canvas.create_text(x1 + 6, y1 + 12, text=label, anchor='w', fill=text_fill, font=('Noto Sans KR', 9, 'bold'), tags=(item.id, 'overlay_item'))
+            canvas.create_text(x1 + 6, y1 + 15, text=label, anchor='w', fill=text_fill, font=('Noto Sans KR', 9, 'bold'), tags=(item.id, 'overlay_item'))
             self._overlay_timeline_regions[item.id] = {'rect': (x1, y1, x2, y2), 'track_index': track_idx}
     total_tracks = max(1, len(track_specs))
     scroll_h = 6 if getattr(self, 'overlay_timeline_hscroll', None) and self.overlay_timeline_hscroll.winfo_exists() else 0
@@ -53,7 +67,7 @@ def refresh_overlay_timeline(self):
     self._update_overlay_timeline_playhead(total_duration, width, row_h, ruler_h, top_pad, total_tracks)
 
 
-def update_overlay_timeline_playhead(self, total_duration=None, width=None, row_h=34, ruler_h=24, top_pad=10, total_tracks=None):
+def update_overlay_timeline_playhead(self, total_duration=None, width=None, row_h=40, ruler_h=24, top_pad=10, total_tracks=None):
     if not hasattr(self, 'overlay_timeline_canvas'):
         return
     canvas = self.overlay_timeline_canvas
@@ -114,7 +128,7 @@ def on_overlay_timeline_drag(self, event):
         return
     mode = drag_state.get('mode')
     current_time = self._timeline_x_to_time(self.overlay_timeline_canvas.canvasx(event.x))
-    min_len = 0.05
+    min_len = 0.1
     if mode == 'move':
         raw_delta = current_time - drag_state['press_time']
         duration = drag_state['origin_end'] - drag_state['origin_start']
@@ -124,10 +138,10 @@ def on_overlay_timeline_drag(self, event):
             new_start = 0.0
             new_end = self._snap_timeline_time(new_start + duration)
         self._apply_item_timeline_times(item, new_start, max(new_start + min_len, new_end))
-    elif mode == 'trim_start':
+    elif mode == 'trim_left':
         new_start = self._snap_timeline_time(current_time)
         self._apply_item_timeline_times(item, min(max(0.0, new_start), item.end_time - min_len), item.end_time)
-    elif mode == 'trim_end':
+    elif mode == 'trim_right':
         new_end = self._snap_timeline_time(current_time)
         self._apply_item_timeline_times(item, item.start_time, max(item.start_time + min_len, new_end))
     self.refresh_overlay_preview()

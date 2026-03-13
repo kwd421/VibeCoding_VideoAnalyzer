@@ -1731,9 +1731,9 @@ class CustomModelApp:
             if x1 <= x <= x2 and y1 <= y <= y2:
                 edge = 8
                 if abs(x - x1) <= edge:
-                    mode = 'trim_start'
+                    mode = 'trim_left'
                 elif abs(x - x2) <= edge:
-                    mode = 'trim_end'
+                    mode = 'trim_right'
                 else:
                     mode = 'move'
                 hits.append((item_id, mode))
