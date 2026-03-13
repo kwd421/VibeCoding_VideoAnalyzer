@@ -20,6 +20,14 @@ from analysis_controller import AnalysisController
 from ui_block_editor import UIBlockEditor
 from app.models.overlay_manager import OverlayManager
 from app.adapters.subtitle_overlay_adapter import build_subtitle_overlays
+from app.ui.overlay_actions import delete_selected_overlay as overlay_delete_selected_overlay, reorder_selected_overlay as overlay_reorder_selected_overlay
+from app.ui.overlay_render import build_overlay_preview_image as overlay_build_overlay_preview_image, rotate_overlay_point as overlay_rotate_overlay_point, get_image_overlay_geometry as overlay_get_image_overlay_geometry
+from app.ui.overlay_selection import clear_overlay_selection_visuals as overlay_clear_selection_visuals, set_selected_overlay as overlay_set_selected_overlay, clear_selected_overlay as overlay_clear_selected_overlay
+from app.ui.overlay_timeline import refresh_overlay_timeline as overlay_refresh_overlay_timeline, update_overlay_timeline_playhead as overlay_update_overlay_timeline_playhead, on_overlay_timeline_press as overlay_on_overlay_timeline_press, on_overlay_timeline_drag as overlay_on_overlay_timeline_drag, on_overlay_timeline_release as overlay_on_overlay_timeline_release
+from app.ui.input_bindings import bind_keys as ui_bind_keys
+from app.ui.overlay_props import refresh_overlay_property_panel as overlay_refresh_property_panel, apply_selected_overlay_properties as overlay_apply_selected_overlay_properties, on_toggle_selected_overlay_visible as overlay_on_toggle_selected_overlay_visible, is_overlay_props_widget as overlay_is_overlay_props_widget, on_overlay_props_mousewheel as overlay_on_overlay_props_mousewheel
+from app.ui.ui_setup_static import build_timeline_notebook as ui_build_timeline_notebook, build_tree_tab_static as ui_build_tree_tab_static, build_overlay_tab_static as ui_build_overlay_tab_static
+from app.ui.ui_setup_inspector import build_inspector_shell as ui_build_inspector_shell, make_inspector_button as ui_make_inspector_button, make_inspector_card as ui_make_inspector_card, make_inspector_row as ui_make_inspector_row, make_inspector_sep as ui_make_inspector_sep, build_style_tab_shell as ui_build_style_tab_shell, make_style_row as ui_make_style_row
 
 class LblMarquee(tk.Canvas):
     def __init__(self, parent, text="", font=('Noto Sans KR', 11), fg='#34C759', bg='#FFFFFF', height=30):
@@ -423,29 +431,8 @@ class CustomModelApp:
         timeline_zone = tk.Frame(v_paned, bg=C['bg'])
         v_paned.add(timeline_zone, minsize=120, height=220)
         
-        self.notebook = ttk.Notebook(timeline_zone)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-        self.tab_canvas = tk.Frame(self.notebook, bg=C['bg'])
-        self.notebook.add(self.tab_canvas, text=' 단어 블록 ')
-        self.tab_overlay = tk.Frame(self.notebook, bg=C['bg'])
-        self.notebook.add(self.tab_overlay, text=' 오버레이 타임라인 ')
-        
-        self.tab_tree = tk.Frame(self.notebook, bg=C['bg2'])
-        self.notebook.add(self.tab_tree, text=' 자막 리스트 ')
-        
-        # [?ъ슜???붿껌] ?먮쭑 ?ㅼ젙 ??蹂꾨룄 遺꾨━
-        self.tab_style = tk.Frame(self.notebook, bg=C['bg'])
-        self.notebook.add(self.tab_style, text=' 자막 설정 ')
-        self.notebook.select(self.tab_canvas)
-        
-        # ?? ?먮쭑 由ъ뒪??Treeview ?ㅼ젙 ??
-        self.tree = ttk.Treeview(self.tab_tree, columns=('no','start','end','text'), show='headings')
-        self.tree.tag_configure('active', background='#D0E5FF')
-        self.tree.heading('no', text='#'); self.tree.heading('start', text='시작'); self.tree.heading('end', text='종료'); self.tree.heading('text', text='대사')
-        self.tree.column('no', width=34, anchor=tk.CENTER); self.tree.column('start', width=70, anchor=tk.CENTER); self.tree.column('end', width=70, anchor=tk.CENTER); self.tree.column('text', width=400)
-        sc = ttk.Scrollbar(self.tab_tree, orient=tk.VERTICAL, command=self.tree.yview); self.tree.configure(yscrollcommand=sc.set)
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); sc.pack(side=tk.RIGHT, fill=tk.Y)
-        
+        self._build_timeline_notebook_shell(timeline_zone)
+        self._build_tree_tab_static()
         self.block_editor = UIBlockEditor(self.tab_canvas, self.root, self.transcript_manager, lambda: self.player, self.rebuild_tree_and_render)
         def _on_tab_changed(e):
             idx = self.notebook.index(self.notebook.select())
@@ -455,121 +442,35 @@ class CustomModelApp:
             elif idx == 1: # ?먮쭑 由ъ뒪??
                 self.tree.yview_moveto(self.block_editor.block_canvas.yview()[0])
         self.notebook.bind('<<NotebookTabChanged>>', _on_tab_changed)
-        overlay_toolbar = tk.Frame(self.tab_overlay, bg=C['bg'])
-        overlay_toolbar.pack(fill=tk.X, padx=8, pady=(8, 4))
-        self.btn_add_image_overlay = tk.Button(overlay_toolbar, text='이미지 오버레이 추가', command=self.add_image_overlay, bg=C['bg2'], fg=C['text'], relief='flat', bd=0, padx=10, pady=6, cursor='hand2')
-        self.btn_add_image_overlay.pack(side=tk.LEFT)
-        self.btn_add_text_overlay = tk.Button(overlay_toolbar, text='텍스트 오버레이 추가', command=self.add_text_overlay, bg=C['bg2'], fg=C['text'], relief='flat', bd=0, padx=10, pady=6, cursor='hand2')
-        self.btn_add_text_overlay.pack(side=tk.LEFT, padx=(6, 0))
-        self.use_subtitle_adapter_var = tk.BooleanVar(value=False)
-        self.subtitle_adapter_check = tk.Checkbutton(overlay_toolbar, text='자막 어댑터', variable=self.use_subtitle_adapter_var, command=lambda: (self.refresh_overlay_preview(), self.refresh_overlay_timeline()), bg=C['bg'], fg=C['text'], selectcolor=C['bg3'], activebackground=C['bg'], activeforeground=C['text'], relief='flat', bd=0, highlightthickness=0, font=_f)
-        self.subtitle_adapter_check.pack(side=tk.LEFT, padx=(8, 0))
-        tk.Label(overlay_toolbar, text='배율', bg=C['bg'], fg=C['text2'], font=_f).pack(side=tk.LEFT, padx=(12, 4))
-        self.overlay_zoom_var = tk.StringVar(value='1x')
-        self.overlay_zoom_combo = ttk.Combobox(overlay_toolbar, textvariable=self.overlay_zoom_var, state='readonly', width=6, values=('1x', '2x', '4x', '8x'))
-        self.overlay_zoom_combo.pack(side=tk.LEFT)
+        self._build_overlay_tab_static(_f)
         self.overlay_zoom_combo.bind('<<ComboboxSelected>>', lambda e: self.refresh_overlay_timeline())
-        tk.Label(overlay_toolbar, text='스냅', bg=C['bg'], fg=C['text2'], font=_f).pack(side=tk.LEFT, padx=(12, 4))
-        self.overlay_snap_var = tk.StringVar(value='0.1초')
-        self.overlay_snap_combo = ttk.Combobox(overlay_toolbar, textvariable=self.overlay_snap_var, state='readonly', width=12, values=('끄기', '0.1초', '프레임'))
-        self.overlay_snap_combo.pack(side=tk.LEFT)
-
-        overlay_body = tk.Frame(self.tab_overlay, bg=C['bg'])
-        overlay_body.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
-
-        overlay_timeline_wrap = tk.Frame(overlay_body, bg=C['bg'])
-        overlay_timeline_wrap.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.overlay_timeline_canvas = tk.Canvas(overlay_timeline_wrap, bg=C['bg2'], highlightthickness=0)
-        self.overlay_timeline_canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-        self.overlay_timeline_hscroll = ttk.Scrollbar(overlay_timeline_wrap, orient=tk.HORIZONTAL, command=self.overlay_timeline_canvas.xview)
-        self.overlay_timeline_hscroll.pack(side=tk.BOTTOM, fill=tk.X)
-        self.overlay_timeline_canvas.configure(xscrollcommand=self.overlay_timeline_hscroll.set)
         self.overlay_timeline_canvas.bind('<Button-1>', self.on_overlay_timeline_press)
         self.overlay_timeline_canvas.bind('<B1-Motion>', self.on_overlay_timeline_drag)
         self.overlay_timeline_canvas.bind('<ButtonRelease-1>', self.on_overlay_timeline_release)
-        self._overlay_timeline_playhead = None
-        self._overlay_timeline_cycle = {'key': None, 'index': 0, 'items': []}
-        self._overlay_timeline_drag = {'item_id': None, 'mode': None, 'press_time': 0.0, 'origin_start': 0.0, 'origin_end': 0.0}
 
-        self.overlay_props_canvas = None
-        self.overlay_props_scroll = None
-        self.overlay_props_inner = None
-        self._overlay_props_window = None
-        self.overlay_visible_check = None
-        self.btn_overlay_forward = None
-        self.btn_overlay_backward = None
-        self.btn_overlay_front = None
-        self.btn_overlay_back = None
-        self.btn_apply_overlay_props = None
-        self.btn_delete_overlay = None
-        self.lbl_overlay_props = None
+        insp_inner = self._build_inspector_shell()
 
-        inspector = tk.Frame(self.main_paned, bg=C['bg'])
-        self.main_paned.add(inspector, minsize=280, width=340)
-
-        insp_scroll = tk.Canvas(inspector, bg=C['bg'], highlightthickness=0, bd=0)
-        insp_sb = ttk.Scrollbar(inspector, orient=tk.VERTICAL, command=insp_scroll.yview)
-        insp_inner = tk.Frame(insp_scroll, bg=C['bg'])
-        insp_inner.bind('<Configure>', lambda e: insp_scroll.configure(scrollregion=insp_scroll.bbox('all')))
-        insp_scroll.create_window((0, 0), window=insp_inner, anchor='nw', tags='inner')
-        insp_scroll.bind('<Configure>', lambda e: insp_scroll.itemconfig('inner', width=e.width))
-        insp_scroll.configure(yscrollcommand=insp_sb.set)
-        insp_sb.pack(side=tk.RIGHT, fill=tk.Y)
-        insp_scroll.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        inspector.bind('<Enter>', lambda e: insp_scroll.bind_all('<MouseWheel>', lambda ev: insp_scroll.yview_scroll(int(-1 * (ev.delta / 120)), 'units')))
-        inspector.bind('<Leave>', lambda e: insp_scroll.unbind_all('<MouseWheel>'))
-
-        def _ctk_button(parent, text, command, kind='secondary', height=38, width=None):
-            palette = {
-                'primary': dict(fg_color=C['accent'], hover_color='#0062CC', text_color='#FFFFFF'),
-                'secondary': dict(fg_color=C['bg3'], hover_color=C['border'], text_color=C['text']),
-                'danger': dict(fg_color='#FFF1F0', hover_color='#FFE5E2', text_color=C['red']),
-                'purple': dict(fg_color=C['purple'], hover_color='#9342B5', text_color='#FFFFFF'),
-                'orange': dict(fg_color=C['orange'], hover_color='#E08600', text_color='#FFFFFF'),
-            }
-            kwargs = dict(text=text, command=command, height=height, corner_radius=14, border_width=0, font=_f, **palette[kind])
-            if width is not None:
-                kwargs['width'] = width
-            return ctk.CTkButton(parent, **kwargs)
-
-        def _card(parent, title=''):
-            shell = tk.Frame(parent, bg=C['bg'])
-            shell.pack(fill=tk.X, padx=12, pady=(0, 6))
-            card = ctk.CTkFrame(shell, fg_color=C['bg2'], corner_radius=18, border_width=1, border_color=C['border'])
-            card.pack(fill=tk.X)
-            if title:
-                ctk.CTkLabel(card, text=title, text_color=C['text'], font=('Noto Sans KR', 12, 'bold')).pack(anchor=tk.W, padx=16, pady=(14, 8))
-            return card
-
-        def _row(parent):
-            row = ctk.CTkFrame(parent, fg_color='transparent', corner_radius=0)
-            row.pack(fill=tk.X, padx=16, pady=4)
-            return row
-
-        def _sep(parent):
-            ctk.CTkFrame(parent, fg_color=C['border'], height=1, corner_radius=999).pack(fill=tk.X, padx=16, pady=8)
-
-        c1 = _card(insp_inner, '파일 및 엔진')
-        self.btn_open = _ctk_button(c1, '영상 파일 선택', self.on_select_video, kind='secondary', height=42)
+        c1 = self._make_inspector_card(insp_inner, '파일 및 엔진')
+        self.btn_open = self._make_inspector_button(c1, '영상 파일 선택', self.on_select_video, kind='secondary', height=42)
         self.btn_open.pack(fill=tk.X, padx=16, pady=(0, 8))
-        r = _row(c1)
+        r = self._make_inspector_row(c1)
         ctk.CTkLabel(r, text='AI 모델', text_color=C['text2'], font=_f).pack(side=tk.LEFT)
         self.ai_model_var = tk.StringVar(value='large-v3-turbo (Default)')
         self.ai_model_combo = ctk.CTkComboBox(r, variable=self.ai_model_var, values=['large-v3-turbo (Default)', 'models/Whisper-Large-v3-turbo-STT-Zeroth-KO-v2 (Local Zeroth)', 'models/whisper-medium-ko-zeroth (Medium-Zeroth)'], width=250, command=lambda _=None: self.reset_action_button())
         self.ai_model_combo.pack(side=tk.RIGHT)
-        _sep(c1)
-        r = _row(c1)
+        self._make_inspector_sep(c1)
+        r = self._make_inspector_row(c1)
         ctk.CTkLabel(r, text='장치', text_color=C['text2'], font=_f).pack(side=tk.LEFT)
         self.device_var = tk.StringVar(value='CPU (50%)')
         self.device_combo = ctk.CTkComboBox(r, variable=self.device_var, values=['Auto', 'NVIDIA (cuda)', 'Apple Mac (mps)', 'CPU (25%)', 'CPU (50%)', 'CPU (75%)'], width=180)
         self.device_combo.pack(side=tk.RIGHT)
-        r = _row(c1)
+        r = self._make_inspector_row(c1)
         ctk.CTkLabel(r, text='언어', text_color=C['text2'], font=_f).pack(side=tk.LEFT)
         self.lang_var = tk.StringVar(value='Korean (ko)')
         self.lang_combo = ctk.CTkComboBox(r, variable=self.lang_var, values=['Korean (ko)', 'English (en)', 'Japanese (ja)', 'Chinese (zh)', 'Auto Detect'], width=180)
         self.lang_combo.pack(side=tk.RIGHT)
 
-        c2 = _card(insp_inner, '분석')
+        c2 = self._make_inspector_card(insp_inner, '분석')
         self.mode_var = tk.StringVar(value='Speech to Text')
         self.mode_combo = ctk.CTkComboBox(c2, variable=self.mode_var, values=['Speech to Text', 'Speech + Cut Edit', 'Peak Search', 'Silence Removal (VAD)', 'Auto Chapter Split (CLIP)'])
         self.mode_combo.pack(fill=tk.X, padx=16, pady=(0, 8))
@@ -582,9 +483,9 @@ class CustomModelApp:
             self.reset_action_button()
 
         self.mode_var.trace_add('write', _check_mode)
-        self.btn_analyze = _ctk_button(c2, '분석 시작', self.on_start_analysis, kind='primary', height=44)
+        self.btn_analyze = self._make_inspector_button(c2, '분석 시작', self.on_start_analysis, kind='primary', height=44)
         self.btn_analyze.pack(fill=tk.X, padx=16, pady=(0, 6))
-        self.btn_stop = _ctk_button(c2, '작업 중지', self.on_stop_action, kind='danger', height=38)
+        self.btn_stop = self._make_inspector_button(c2, '작업 중지', self.on_stop_action, kind='danger', height=38)
         self.btn_stop.pack(fill=tk.X, padx=16)
         self.btn_stop.configure(state=tk.DISABLED)
         self.lbl_status = LblMarquee(c2, text='준비 완료', fg=C['green'], bg=C['bg2'], font=_f)
@@ -599,12 +500,12 @@ class CustomModelApp:
         self.use_burn_sub_checkbox.pack(anchor=tk.W, pady=(0, 6))
         btn_box = ctk.CTkFrame(self.save_frame, fg_color='transparent', corner_radius=0)
         btn_box.pack(fill=tk.X)
-        self.btn_fast_save = _ctk_button(btn_box, 'Fast Render', lambda: self.start_export(fast=True), kind='purple', height=38)
+        self.btn_fast_save = self._make_inspector_button(btn_box, 'Fast Render', lambda: self.start_export(fast=True), kind='purple', height=38)
         self.btn_fast_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
-        self.btn_pro_save = _ctk_button(btn_box, 'Precise Render', lambda: self.start_export(fast=False), kind='secondary', height=38)
+        self.btn_pro_save = self._make_inspector_button(btn_box, 'Precise Render', lambda: self.start_export(fast=False), kind='secondary', height=38)
         self.btn_pro_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(3, 0))
 
-        c3 = _card(insp_inner, 'Recognition Options')
+        c3 = self._make_inspector_card(insp_inner, 'Recognition Options')
         self.beam_size_var = tk.IntVar(value=5)
         self.use_denoise_var = tk.BooleanVar(value=False)
         self.use_dominant_var = tk.BooleanVar(value=False)
@@ -614,7 +515,7 @@ class CustomModelApp:
         self.use_whisperx_var = tk.BooleanVar(value=False)
         self.remove_punc_check = ctk.CTkCheckBox(c3, text='Remove punctuation', variable=self.remove_punctuation_var)
         self.remove_punc_check.pack(anchor=tk.W, padx=16, pady=(0, 4))
-        _sep(c3)
+        self._make_inspector_sep(c3)
         self.silero_check = ctk.CTkCheckBox(c3, text='External VAD (Silero)', variable=self.use_silero_vad_var)
         self.silero_check.pack(anchor=tk.W, padx=16, pady=2)
         self.whisper_vad_check = ctk.CTkCheckBox(c3, text='Internal VAD (Whisper)', variable=self.use_whisper_vad_var)
@@ -628,37 +529,29 @@ class CustomModelApp:
                 self.use_whisperx_var.set(False)
 
         self.use_whisperx_var.trace_add('write', _check_whisperx)
-        _sep(c3)
-        r = _row(c3)
+        self._make_inspector_sep(c3)
+        r = self._make_inspector_row(c3)
         ctk.CTkLabel(r, text='Silence Length', text_color=C['text2'], font=_f).pack(side=tk.LEFT)
         self.silence_dur_var = tk.DoubleVar(value=2.0)
         self.silence_entry = ctk.CTkEntry(r, textvariable=self.silence_dur_var, width=90)
         self.silence_entry.pack(side=tk.RIGHT)
-        r = _row(c3)
+        r = self._make_inspector_row(c3)
         ctk.CTkLabel(r, text='Speech Padding', text_color=C['text2'], font=_f).pack(side=tk.LEFT)
         self.speech_pad_var = tk.DoubleVar(value=0.1)
         self.pad_entry = ctk.CTkEntry(r, textvariable=self.speech_pad_var, width=90)
         self.pad_entry.pack(side=tk.RIGHT)
-        r = _row(c3)
+        r = self._make_inspector_row(c3)
         ctk.CTkLabel(r, text='VAD Threshold', text_color=C['text2'], font=_f).pack(side=tk.LEFT)
         self.vad_threshold_var = tk.DoubleVar(value=0.35)
         self.vad_slider = ctk.CTkSlider(r, from_=0.1, to=0.9, variable=self.vad_threshold_var, width=140)
         self.vad_slider.pack(side=tk.RIGHT)
-        r = _row(c3)
+        r = self._make_inspector_row(c3)
         ctk.CTkLabel(r, text='Subtitle Length', text_color=C['text2'], font=_f).pack(side=tk.LEFT)
         self.max_len_int = tk.IntVar(value=20)
         self.max_len_slider = ctk.CTkSlider(r, from_=10, to=50, variable=self.max_len_int, number_of_steps=40, width=140)
         self.max_len_slider.pack(side=tk.RIGHT)
 
-        cs = self.tab_style
-        st_inner = ctk.CTkFrame(cs, fg_color='transparent', corner_radius=0)
-        st_inner.pack(fill=tk.BOTH, expand=True, padx=30, pady=20)
-
-        def _st_row(label):
-            fr = ctk.CTkFrame(st_inner, fg_color='transparent', corner_radius=0)
-            fr.pack(fill=tk.X, pady=8)
-            ctk.CTkLabel(fr, text=label, text_color=C['text'], font=_fb, width=150, anchor='w').pack(side=tk.LEFT)
-            return fr
+        st_inner = self._build_style_tab_shell()
 
         self._sub_debounce = None
         def _update_sub(*_):
@@ -673,75 +566,75 @@ class CustomModelApp:
             def set(self, v): self._var.set(v)
         self.sub_font = _FontProxy(self._sub_font_name)
 
-        r = _st_row('Font Name')
-        self._font_btn = _ctk_button(r, 'Choose Font', self._open_font_picker, kind='secondary', height=34, width=180)
+        r = self._make_style_row(st_inner, 'Font Name', _fb)
+        self._font_btn = self._make_inspector_button(r, 'Choose Font', self._open_font_picker, kind='secondary', height=34, width=180)
         self._font_btn.pack(side=tk.LEFT)
         self._sub_font_name.trace_add('write', lambda *_: [self._font_btn.configure(text=self._sub_font_name.get()), _update_sub()])
 
         self.sub_font_size = tk.IntVar(value=80)
-        r = _st_row('Font Size')
+        r = self._make_style_row(st_inner, 'Font Size', _fb)
         self.sub_font_size_slider = ctk.CTkSlider(r, from_=10, to=200, variable=self.sub_font_size, number_of_steps=190, width=260)
         self.sub_font_size_slider.pack(side=tk.LEFT)
         self.sub_font_size.trace_add('write', _update_sub)
 
         self.sub_color_f = tk.StringVar(value='#FFFFFF')
-        r = _st_row('Text Color')
+        r = self._make_style_row(st_inner, 'Text Color', _fb)
         def _pick_f():
             c = tk.colorchooser.askcolor(initialcolor=self.sub_color_f.get())[1]
             if c:
                 self.sub_color_f.set(c)
                 _update_sub()
-        self.sub_color_f_btn = _ctk_button(r, 'Choose Color', _pick_f, kind='secondary', height=32, width=150)
+        self.sub_color_f_btn = self._make_inspector_button(r, 'Choose Color', _pick_f, kind='secondary', height=32, width=150)
         self.sub_color_f_btn.pack(side=tk.LEFT)
         ctk.CTkLabel(r, textvariable=self.sub_color_f, text_color=C['text2'], font=_f).pack(side=tk.LEFT, padx=12)
 
         self.sub_outline = tk.IntVar(value=3)
-        r = _st_row('Outline Width')
+        r = self._make_style_row(st_inner, 'Outline Width', _fb)
         self.sub_outline_slider = ctk.CTkSlider(r, from_=0, to=15, variable=self.sub_outline, number_of_steps=15, width=260)
         self.sub_outline_slider.pack(side=tk.LEFT)
         self.sub_outline.trace_add('write', _update_sub)
 
         self.sub_color_o = tk.StringVar(value='#000000')
-        r = _st_row('Outline Color')
+        r = self._make_style_row(st_inner, 'Outline Color', _fb)
         def _pick_o():
             c = tk.colorchooser.askcolor(initialcolor=self.sub_color_o.get())[1]
             if c:
                 self.sub_color_o.set(c)
                 _update_sub()
-        self.sub_color_o_btn = _ctk_button(r, 'Choose Color', _pick_o, kind='secondary', height=32, width=150)
+        self.sub_color_o_btn = self._make_inspector_button(r, 'Choose Color', _pick_o, kind='secondary', height=32, width=150)
         self.sub_color_o_btn.pack(side=tk.LEFT)
         ctk.CTkLabel(r, textvariable=self.sub_color_o, text_color=C['text2'], font=_f).pack(side=tk.LEFT, padx=12)
 
         self.sub_shadow = tk.IntVar(value=3)
-        r = _st_row('Shadow Depth')
+        r = self._make_style_row(st_inner, 'Shadow Depth', _fb)
         self.sub_shadow_slider = ctk.CTkSlider(r, from_=0, to=15, variable=self.sub_shadow, number_of_steps=15, width=260)
         self.sub_shadow_slider.pack(side=tk.LEFT)
         self.sub_shadow.trace_add('write', _update_sub)
 
         self.sub_color_s = tk.StringVar(value='#000000')
-        r = _st_row('Shadow Color')
+        r = self._make_style_row(st_inner, 'Shadow Color', _fb)
         def _pick_s():
             c = tk.colorchooser.askcolor(initialcolor=self.sub_color_s.get())[1]
             if c:
                 self.sub_color_s.set(c)
                 _update_sub()
-        self.sub_color_s_btn = _ctk_button(r, 'Choose Color', _pick_s, kind='secondary', height=32, width=150)
+        self.sub_color_s_btn = self._make_inspector_button(r, 'Choose Color', _pick_s, kind='secondary', height=32, width=150)
         self.sub_color_s_btn.pack(side=tk.LEFT)
         ctk.CTkLabel(r, textvariable=self.sub_color_s, text_color=C['text2'], font=_f).pack(side=tk.LEFT, padx=12)
 
         self.sub_y_pos = tk.IntVar(value=50)
-        r = _st_row('Subtitle Y Position')
+        r = self._make_style_row(st_inner, 'Subtitle Y Position', _fb)
         self.sub_y_pos_slider = ctk.CTkSlider(r, from_=0, to=400, variable=self.sub_y_pos, number_of_steps=400, width=260)
         self.sub_y_pos_slider.pack(side=tk.LEFT)
         self.sub_y_pos.trace_add('write', _update_sub)
 
-        c4 = _card(insp_inner, 'Export')
-        r = _row(c4)
+        c4 = self._make_inspector_card(insp_inner, 'Export')
+        r = self._make_inspector_row(c4)
         ctk.CTkLabel(r, text='Format', text_color=C['text2'], font=_f).pack(side=tk.LEFT)
         self.export_format = tk.StringVar(value='SRT')
         self.export_format_combo = ctk.CTkComboBox(r, variable=self.export_format, values=['SRT', 'VTT', 'TXT', 'CSV', 'FCPXML'], width=140)
         self.export_format_combo.pack(side=tk.RIGHT)
-        self.btn_export_ass = _ctk_button(c4, '자막 내보내기', self.export_subtitles, kind='orange', height=38)
+        self.btn_export_ass = self._make_inspector_button(c4, '자막 내보내기', self.export_subtitles, kind='orange', height=38)
         self.btn_export_ass.pack(fill=tk.X, padx=16, pady=(8, 14))
 
         self.menu = tk.Menu(self.root, tearoff=0, bg=C['bg2'], fg=C['text'], activebackground=C['accent'], activeforeground='white', font=_f)
@@ -804,6 +697,36 @@ class CustomModelApp:
 
 
 
+    def _build_timeline_notebook_shell(self, timeline_zone):
+        return ui_build_timeline_notebook(self, timeline_zone)
+
+    def _build_tree_tab_static(self):
+        return ui_build_tree_tab_static(self)
+
+    def _build_overlay_tab_static(self, body_font):
+        return ui_build_overlay_tab_static(self, body_font)
+
+    def _build_inspector_shell(self):
+        return ui_build_inspector_shell(self)
+
+    def _make_inspector_button(self, parent, text, command, body_font=None, kind='secondary', height=38, width=None):
+        return ui_make_inspector_button(self, parent, text, command, body_font, kind=kind, height=height, width=width)
+
+    def _make_inspector_card(self, parent, title='', title_font=('Noto Sans KR', 12, 'bold')):
+        return ui_make_inspector_card(self, parent, title=title, title_font=title_font)
+
+    def _make_inspector_row(self, parent):
+        return ui_make_inspector_row(parent)
+
+    def _make_inspector_sep(self, parent):
+        return ui_make_inspector_sep(self, parent)
+
+    def _build_style_tab_shell(self):
+        return ui_build_style_tab_shell(self)
+
+    def _make_style_row(self, parent, label, label_font):
+        return ui_make_style_row(self, parent, label, label_font)
+
     def _open_font_picker(self):
         """?쒖뒪???고듃 ?꾩껜瑜??먯껜 ?쒖껜濡?誘몃━蹂닿린?섎ŉ 寃???좏깮?섎뒗 ?앹뾽"""
         popup = tk.Toplevel(self.root)
@@ -863,61 +786,8 @@ class CustomModelApp:
         search_var.trace_add("write", _on_search)
 
     def bind_keys(self):
-        def _is_editing():
-            """?꾩옱 ?ъ빱?ㅺ? ?띿뒪???몄쭛 ?꾩젽???덉쑝硫?True (???대깽??李⑤떒)"""
-            w = self.root.focus_get()
-            return isinstance(w, (tk.Entry, tk.Text))
+        return ui_bind_keys(self)
 
-        def _on_space(e):
-            if _is_editing(): return  # ?몄쭛 以묒뿏 ?ㅽ럹?댁뒪諛붾? ?꾩젽???섍?
-            self.toggle_play()
-            return "break"
-
-        def _on_left(e):
-            if _is_editing(): return  # ?몄쭛 以묒뿏 醫뚮갑?ν궎瑜??꾩젽???섍?
-            self.skip_time(-5000)
-            return "break"
-
-        def _on_right(e):
-            if _is_editing(): return  # ?몄쭛 以묒뿏 ?곕갑?ν궎瑜??꾩젽???섍?
-            self.skip_time(5000)
-            return "break"
-
-        def _on_undo(e):
-            if _is_editing(): return # ?몄쭛 以묒씤 ?띿뒪?몄쓽 undo???쒖뒪?쒖뿉 留↔?
-            if self.transcript_manager.undo():
-                self.rebuild_tree_and_render()
-            return "break"
-            
-        def _on_redo(e):
-            if _is_editing(): return
-            if self.transcript_manager.redo():
-                self.rebuild_tree_and_render()
-            return "break"
-
-        def _on_delete(e):
-            if _is_editing():
-                return
-            if self.overlay_manager.selected_item_id is None:
-                return
-            self.delete_selected_overlay()
-            return "break"
-
-        self.root.bind_all("<space>", _on_space)
-        self.root.bind_all("<Left>",  _on_left)
-        self.root.bind_all("<Right>", _on_right)
-        self.root.bind_all("<Control-z>", _on_undo)
-        self.root.bind_all("<Control-y>", _on_redo)
-        self.root.bind_all("<Control-Z>", _on_redo) # Shift+Z
-        self.root.bind_all("<Delete>", _on_delete)
-
-        # [?ъ슜???붿껌] ??씠??由ъ뒪?몄뿉 ?ъ빱?ㅺ? ?덉쓣 ??諛⑺뼢?ㅻ줈 硫붾돱媛 ?섏뼱媛??Tkinter 湲곕낯 ?숈옉 李⑤떒
-        try:
-            self.root.unbind_class('TNotebook', '<Left>')
-            self.root.unbind_class('TNotebook', '<Right>')
-            self.root.unbind_class('Treeview', '<Left>')
-            self.root.unbind_class('Treeview', '<Right>')
-        except: pass
     def format_time(self, t_sec):
         m = int(t_sec // 60)
         s = t_sec % 60
@@ -1047,150 +917,19 @@ class CustomModelApp:
             item.end_time = end_time
 
     def refresh_overlay_property_panel(self):
-        if getattr(self, 'lbl_overlay_props', None) is None:
-            return
-        selected = self._get_any_overlay_item(self.overlay_manager.selected_item_id)
-        if selected is None:
-            for key, var in self.overlay_prop_vars.items():
-                if key == 'visible':
-                    var.set(False)
-                else:
-                    var.set('')
-            self.lbl_overlay_props.config(text='??? ????? ????')
-            for ent in self.overlay_prop_entries.values():
-                ent.configure(state=tk.DISABLED)
-            for btn in [self.btn_apply_overlay_props, self.btn_overlay_forward, self.btn_overlay_backward, self.btn_overlay_front, self.btn_overlay_back, self.overlay_visible_check]:
-                btn.configure(state=tk.DISABLED)
-            return
-        values = {
-            'text': selected.text or '',
-            'x': self._fmt_overlay_prop(selected.x, 0),
-            'y': self._fmt_overlay_prop(selected.y, 0),
-            'width': self._fmt_overlay_prop(selected.width, 0),
-            'height': self._fmt_overlay_prop(selected.height, 0),
-            'start_time': self._fmt_overlay_prop(selected.start_time, 2),
-            'end_time': self._fmt_overlay_prop(selected.end_time, 2),
-            'opacity': self._fmt_overlay_prop(selected.opacity, 2),
-            'font_size': self._fmt_overlay_prop(selected.font_size, 0),
-            'text_color': selected.text_color or '#FFFFFF',
-            'rotation': self._fmt_overlay_prop(selected.rotation, 1),
-        }
-        for key, value in values.items():
-            self.overlay_prop_vars[key].set(value)
-        self.overlay_prop_vars['visible'].set(bool(selected.visible))
-        vis_text = '??' if selected.visible else '??'
-        name = selected.text if selected.type == 'text' else os.path.basename(selected.source or selected.id)
-        self.lbl_overlay_props.config(text=f'??: {name}\n??: {selected.type}\n???: {selected.layer_index}\n??: {vis_text}')
-        for key, ent in self.overlay_prop_entries.items():
-            if key in ('text', 'font_size', 'text_color') and selected.type != 'text':
-                ent.configure(state=tk.DISABLED)
-            elif key == 'rotation' and selected.type != 'image':
-                ent.configure(state=tk.DISABLED)
-            else:
-                ent.configure(state=tk.NORMAL)
-        for btn in [self.btn_apply_overlay_props, self.btn_overlay_forward, self.btn_overlay_backward, self.btn_overlay_front, self.btn_overlay_back, self.overlay_visible_check]:
-            btn.configure(state=tk.NORMAL)
+        return overlay_refresh_property_panel(self)
 
     def apply_selected_overlay_properties(self):
-        selected = self._get_any_overlay_item(self.overlay_manager.selected_item_id)
-        if selected is None:
-            return
-        try:
-            if selected.type != 'subtitle':
-                selected.x = max(0.0, float(self.overlay_prop_vars['x'].get()))
-            if selected.type != 'subtitle':
-                selected.y = max(0.0, float(self.overlay_prop_vars['y'].get()))
-                selected.width = max(16.0, float(self.overlay_prop_vars['width'].get()))
-                selected.height = max(16.0, float(self.overlay_prop_vars['height'].get()))
-                if selected.type == 'image':
-                    selected.rotation = float(self.overlay_prop_vars['rotation'].get() or selected.rotation or 0.0)
-            start_time = max(0.0, float(self.overlay_prop_vars['start_time'].get()))
-            end_time = max(start_time, float(self.overlay_prop_vars['end_time'].get()))
-            if selected.type == 'subtitle':
-                idx = self._get_subtitle_segment_index(selected)
-                if idx is None:
-                    return
-                ov = dict(self.subtitle_adapter_overrides.get(idx, {}))
-                ov['start_time'] = start_time
-                ov['end_time'] = end_time
-                ov['visible'] = bool(self.overlay_prop_vars['visible'].get())
-                ov['font_size'] = max(8.0, float(self.overlay_prop_vars['font_size'].get() or selected.font_size or 48))
-                color = self.overlay_prop_vars['text_color'].get().strip() or '#FFFFFF'
-                if not color.startswith('#') or len(color) not in (4, 7):
-                    raise ValueError
-                ov['text_color'] = color
-                self.subtitle_adapter_overrides[idx] = ov
-            else:
-                selected.start_time = start_time
-                selected.end_time = end_time
-                selected.opacity = max(0.0, min(1.0, float(self.overlay_prop_vars['opacity'].get())))
-                selected.visible = bool(self.overlay_prop_vars['visible'].get())
-            if selected.type == 'text':
-                selected.text = self.overlay_prop_vars['text'].get()
-                selected.font_size = max(8.0, float(self.overlay_prop_vars['font_size'].get() or 48))
-                color = self.overlay_prop_vars['text_color'].get().strip() or '#FFFFFF'
-                if not color.startswith('#') or len(color) not in (4, 7):
-                    raise ValueError
-                selected.text_color = color
-        except ValueError:
-            messagebox.showerror('오류', '오버레이 속성은 올바른 숫자여야 합니다.')
-            return
-        self._invalidate_overlay_preview_cache(selected.id)
-        self.refresh_overlay_preview()
-        self.refresh_overlay_timeline()
-        self.refresh_overlay_property_panel()
+        return overlay_apply_selected_overlay_properties(self)
 
     def on_toggle_selected_overlay_visible(self):
-        selected = self._get_any_overlay_item(self.overlay_manager.selected_item_id)
-        if selected is None:
-            return
-        if selected.type == 'subtitle':
-            idx = self._get_subtitle_segment_index(selected)
-            if idx is None:
-                return
-            ov = dict(self.subtitle_adapter_overrides.get(idx, {}))
-            ov['visible'] = bool(self.overlay_prop_vars['visible'].get())
-            self.subtitle_adapter_overrides[idx] = ov
-        else:
-            selected.visible = bool(self.overlay_prop_vars['visible'].get())
-        self.refresh_overlay_preview()
-        self.refresh_overlay_timeline()
-        self.refresh_overlay_property_panel()
+        return overlay_on_toggle_selected_overlay_visible(self)
 
     def delete_selected_overlay(self):
-        selected = self.overlay_manager.get_selected()
-        if selected is None or selected.type == 'subtitle':
-            return
-        item_id = selected.id
-        self.overlay_manager.remove_item(item_id)
-        widget = self._overlay_label_refs.pop(item_id, None)
-        if widget is not None and widget.winfo_exists():
-            widget.destroy()
-        refs = self._overlay_canvas_refs.pop(item_id, None)
-        if refs:
-            for canvas_id in refs.get('markers', []):
-                try:
-                    self.preview_overlay_canvas.delete(canvas_id)
-                except tk.TclError:
-                    pass
-            image_id = refs.get('image')
-            if image_id:
-                try:
-                    self.preview_overlay_canvas.delete(image_id)
-                except tk.TclError:
-                    pass
-        self._overlay_photo_refs.pop(item_id, None)
-        self._invalidate_overlay_preview_cache(item_id)
-        self.overlay_manager.set_selected(None)
-        self.refresh_overlay_preview()
-        self.refresh_overlay_timeline()
-        self.refresh_overlay_property_panel()
+        return overlay_delete_selected_overlay(self)
 
     def reorder_selected_overlay(self, direction):
-        if self.overlay_manager.move_selected_layer(direction):
-            self.refresh_overlay_preview()
-            self.refresh_overlay_timeline()
-            self.refresh_overlay_property_panel()
+        return overlay_reorder_selected_overlay(self, direction)
 
     def _get_video_viewport_rect(self):
         frame_w = max(1, self.video_frame.winfo_width())
@@ -1369,69 +1108,13 @@ class CustomModelApp:
         return cleaned
 
     def _build_overlay_preview_image(self, item, width, height, draft=False):
-        width = max(1, int(width))
-        height = max(1, int(height))
-        if item.type == 'image':
-            src = self._get_overlay_source_image(item.source)
-            if src is None:
-                return None
-            resample = Image.BILINEAR if draft else Image.LANCZOS
-            img = src.resize((width, height), resample)
-            rotation = float(getattr(item, 'rotation', 0.0) or 0.0)
-            if abs(rotation) > 0.01:
-                img = img.rotate(-rotation, expand=True, resample=Image.BICUBIC if not draft else Image.BILINEAR, fillcolor=(0, 0, 0, 0))
-            opacity = max(0.0, min(1.0, float(getattr(item, 'opacity', 1.0) or 1.0)))
-            if opacity < 0.999:
-                alpha = img.getchannel('A').point(lambda value: int(value * opacity))
-                img.putalpha(alpha)
-            surface_size = max(int(math.ceil(math.hypot(width, height))), img.width, img.height)
-            if img.width != surface_size or img.height != surface_size:
-                surface = Image.new('RGBA', (surface_size, surface_size), (0, 0, 0, 0))
-                offset_x = (surface_size - img.width) // 2
-                offset_y = (surface_size - img.height) // 2
-                surface.alpha_composite(img, (offset_x, offset_y))
-                img = surface
-            return img
-        if item.type in ('text', 'subtitle'):
-            img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-            draw = ImageDraw.Draw(img)
-            font = self._get_preview_text_font(max(8, int(item.font_size)))
-            draw.multiline_text((6, 6), item.text or '', font=font, fill=self._hex_to_rgba(item.text_color, item.opacity), spacing=4)
-            return img
-        return None
+        return overlay_build_overlay_preview_image(self, item, width, height, draft=draft)
 
     def _rotate_overlay_point(self, cx, cy, px, py, rotation_deg):
-        theta = math.radians(float(rotation_deg or 0.0))
-        dx = px - cx
-        dy = py - cy
-        cos_t = math.cos(theta)
-        sin_t = math.sin(theta)
-        return (
-            cx + (dx * cos_t) - (dy * sin_t),
-            cy + (dx * sin_t) + (dy * cos_t),
-        )
+        return overlay_rotate_overlay_point(self, cx, cy, px, py, rotation_deg)
 
     def _get_image_overlay_geometry(self, item, preview_w, preview_h):
-        x, y, w, h = self.overlay_manager.preview_rect(item, preview_w, preview_h)
-        cx = x + (w / 2.0)
-        cy = y + (h / 2.0)
-        base_corners = [
-            (x, y),
-            (x + w, y),
-            (x + w, y + h),
-            (x, y + h),
-        ]
-        corners = [self._rotate_overlay_point(cx, cy, px, py, getattr(item, 'rotation', 0.0)) for px, py in base_corners]
-        xs = [pt[0] for pt in corners]
-        ys = [pt[1] for pt in corners]
-        bbox = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
-        return {
-            'center': (cx, cy),
-            'base_rect': (x, y, w, h),
-            'corners': corners,
-            'corner_roles': self._get_screen_corner_roles((cx, cy), corners),
-            'bbox': bbox,
-        }
+        return overlay_get_image_overlay_geometry(self, item, preview_w, preview_h)
 
     def _get_screen_corner_roles(self, center, corners):
         ordered = list(corners)
@@ -1638,37 +1321,13 @@ class CustomModelApp:
             self.overlay_rotate_handle.place_forget()
 
     def _clear_overlay_selection_visuals(self):
-        try:
-            self.preview_overlay_canvas.delete('selection_marker')
-        except tk.TclError:
-            pass
-        self.overlay_resize_handle.place_forget()
-        self.overlay_rotate_handle.place_forget()
-        for item_id, label in list(self._overlay_label_refs.items()):
-            if not label.winfo_exists() or not isinstance(label, tk.Label):
-                continue
-            try:
-                label.configure(highlightthickness=0, bd=0, relief='flat')
-            except tk.TclError:
-                pass
+        return overlay_clear_selection_visuals(self)
 
     def _set_selected_overlay(self, item_id, refresh_preview=True, refresh_timeline=True):
-        self.overlay_manager.set_selected(item_id)
-        if refresh_preview:
-            self.refresh_overlay_preview()
-        if refresh_timeline:
-            self.refresh_overlay_timeline()
-        self.refresh_overlay_property_panel()
+        return overlay_set_selected_overlay(self, item_id, refresh_preview=refresh_preview, refresh_timeline=refresh_timeline)
 
     def _clear_selected_overlay(self, refresh_preview=True, refresh_timeline=True):
-        self.overlay_manager.set_selected(None)
-        self._overlay_drag = {'item_id': None, 'mode': None, 'start_x': 0, 'start_y': 0, 'origin': None}
-        self._clear_overlay_selection_visuals()
-        if refresh_preview:
-            self.refresh_overlay_preview()
-        if refresh_timeline:
-            self.refresh_overlay_timeline()
-        self.refresh_overlay_property_panel()
+        return overlay_clear_selected_overlay(self, refresh_preview=refresh_preview, refresh_timeline=refresh_timeline)
 
     def _focus_within_preview_overlay(self, widget):
         overlay_widgets = {
@@ -1793,31 +1452,10 @@ class CustomModelApp:
         self.refresh_overlay_property_panel()
 
     def _is_overlay_props_widget(self, widget):
-        panel = getattr(self, 'overlay_props_inner', None)
-        while widget is not None:
-            if widget is panel:
-                return True
-            widget = getattr(widget, 'master', None)
-        return False
+        return overlay_is_overlay_props_widget(self, widget)
 
     def _on_overlay_props_mousewheel(self, event):
-        if not hasattr(self, 'overlay_props_canvas') or not self.overlay_props_canvas.winfo_exists():
-            return
-        if not self._is_overlay_props_widget(getattr(event, 'widget', None)):
-            return
-        if getattr(event, 'num', None) == 4:
-            units = -3
-        elif getattr(event, 'num', None) == 5:
-            units = 3
-        else:
-            delta = getattr(event, 'delta', 0)
-            if delta == 0:
-                return
-            units = int(-1 * (delta / 120)) * 3
-            if units == 0:
-                units = -3 if delta > 0 else 3
-        self.overlay_props_canvas.yview_scroll(units, 'units')
-        return 'break'
+        return overlay_on_overlay_props_mousewheel(self, event)
 
     def _schedule_resize_preview_refresh(self, item_id, delay=40):
         self._overlay_resize_dirty_item = item_id
@@ -2001,136 +1639,19 @@ class CustomModelApp:
         return cycle['items'][cycle['index']]
 
     def refresh_overlay_timeline(self):
-        if not hasattr(self, 'overlay_timeline_canvas'):
-            return
-        canvas = self.overlay_timeline_canvas
-        canvas.delete('all')
-        self._overlay_timeline_regions = {}
-        visible_width = max(400, canvas.winfo_width())
-        width = self._get_overlay_timeline_content_width(visible_width)
-        row_h = 34
-        ruler_h = 24
-        top_pad = 10
-        total_duration = self._get_overlay_timeline_total_duration()
-        track_specs = [(idx, track.name, sorted(track.items, key=lambda ov: (ov.layer_index, ov.id))) for idx, track in enumerate(self.overlay_manager.tracks)]
-        subtitle_items = self._get_subtitle_adapter_items()
-        if subtitle_items:
-            track_specs.append((len(track_specs), '자막 어댑터', subtitle_items))
-        self._draw_overlay_timeline_ruler(total_duration, width, ruler_h)
-        for track_idx, track_name, track_items in track_specs:
-            y1 = top_pad + ruler_h + track_idx * row_h
-            y2 = y1 + 24
-            canvas.create_text(10, y1 + 12, text=track_name, anchor='w', fill=self.C['text2'], font=('Noto Sans KR', 10))
-            for item in track_items:
-                x1 = self._time_to_timeline_x(item.start_time, total_duration, width)
-                x2 = self._time_to_timeline_x(item.end_time, total_duration, width)
-                x2 = max(x1 + 18, x2)
-                is_selected = item.id == self.overlay_manager.selected_item_id
-                fill = '#0A84FF' if is_selected else ('#5AC8FA' if item.visible else '#8E8E93')
-                outline = '#FFFFFF' if is_selected else ''
-                canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline=outline, width=1, tags=(item.id, 'overlay_item'))
-                if item.type == 'text':
-                    tag_name = 'TXT'
-                elif item.type == 'subtitle':
-                    tag_name = 'SUB'
-                else:
-                    tag_name = 'IMG'
-                label = f'{tag_name} {item.layer_index}' if item.visible else f'{tag_name} {item.layer_index} OFF'
-                text_fill = 'white' if item.visible else '#E5E5EA'
-                canvas.create_text(x1 + 6, y1 + 12, text=label, anchor='w', fill=text_fill, font=('Noto Sans KR', 9, 'bold'), tags=(item.id, 'overlay_item'))
-                self._overlay_timeline_regions[item.id] = {'rect': (x1, y1, x2, y2), 'track_index': track_idx}
-        total_tracks = max(1, len(track_specs))
-        scroll_h = 6 if getattr(self, 'overlay_timeline_hscroll', None) and self.overlay_timeline_hscroll.winfo_exists() else 0
-        bottom = top_pad + ruler_h + total_tracks * row_h + 12 + scroll_h
-        canvas.configure(scrollregion=(0, 0, width, bottom))
-        self._update_overlay_timeline_playhead(total_duration, width, row_h, ruler_h, top_pad, total_tracks)
+        return overlay_refresh_overlay_timeline(self)
 
     def _update_overlay_timeline_playhead(self, total_duration=None, width=None, row_h=34, ruler_h=24, top_pad=10, total_tracks=None):
-        if not hasattr(self, 'overlay_timeline_canvas'):
-            return
-        canvas = self.overlay_timeline_canvas
-        if width is None:
-            width = self._get_overlay_timeline_content_width()
-        if total_duration is None:
-            total_duration = 1.0
-            if self.player and self.player.get_length() > 0:
-                total_duration = max(total_duration, self.player.get_length() / 1000.0)
-            for item in self._get_timeline_items():
-                total_duration = max(total_duration, item.end_time)
-        if total_tracks is None:
-            total_tracks = max(1, len(self.overlay_manager.tracks) + (1 if self._get_subtitle_adapter_items() else 0))
-        current_sec = self._get_overlay_time()
-        x = self._time_to_timeline_x(current_sec, total_duration, width)
-        y1 = 4
-        y2 = top_pad + ruler_h + total_tracks * row_h + 6
-        if self._overlay_timeline_playhead and canvas.type(self._overlay_timeline_playhead):
-            canvas.coords(self._overlay_timeline_playhead, x, y1, x, y2)
-            canvas.itemconfigure(self._overlay_timeline_playhead, fill='#FF453A', width=2)
-        else:
-            self._overlay_timeline_playhead = canvas.create_line(x, y1, x, y2, fill='#FF453A', width=2)
+        return overlay_update_overlay_timeline_playhead(self, total_duration=total_duration, width=width, row_h=row_h, ruler_h=ruler_h, top_pad=top_pad, total_tracks=total_tracks)
 
     def on_overlay_timeline_press(self, event):
-        canvas_x = self.overlay_timeline_canvas.canvasx(event.x)
-        shift_pressed = bool(event.state & 0x0001)
-        hits = self._hit_overlay_timeline_items(canvas_x, event.y)
-        item_id, mode = self._pick_overlay_timeline_hit(hits, canvas_x, event.y, advance=shift_pressed or len(hits) > 1)
-        if not item_id:
-            self._overlay_timeline_drag = {'item_id': None, 'mode': None, 'press_time': 0.0, 'origin_start': 0.0, 'origin_end': 0.0}
-            self._clear_selected_overlay(refresh_preview=True, refresh_timeline=True)
-            return
-        item = self._get_any_overlay_item(item_id)
-        if item is None:
-            self._overlay_timeline_drag = {'item_id': None, 'mode': None, 'press_time': 0.0, 'origin_start': 0.0, 'origin_end': 0.0}
-            return
-        press_time = self._timeline_x_to_time(canvas_x)
-        self._overlay_timeline_drag = {
-            'item_id': item_id,
-            'mode': mode,
-            'press_time': press_time,
-            'origin_start': item.start_time,
-            'origin_end': item.end_time,
-        }
-        self._set_selected_overlay(item_id, refresh_preview=True, refresh_timeline=True)
+        return overlay_on_overlay_timeline_press(self, event)
 
     def on_overlay_timeline_drag(self, event):
-        drag_state = getattr(self, '_overlay_timeline_drag', None)
-        if not drag_state:
-            return
-        item_id = drag_state.get('item_id')
-        if not item_id:
-            return
-        item = self._get_any_overlay_item(item_id)
-        if item is None:
-            return
-        mode = drag_state.get('mode')
-        current_time = self._timeline_x_to_time(self.overlay_timeline_canvas.canvasx(event.x))
-        min_len = 0.05
-        if mode == 'move':
-            raw_delta = current_time - drag_state['press_time']
-            duration = drag_state['origin_end'] - drag_state['origin_start']
-            new_start = self._snap_timeline_time(drag_state['origin_start'] + raw_delta)
-            new_end = self._snap_timeline_time(new_start + duration)
-            if new_start < 0:
-                new_start = 0.0
-                new_end = self._snap_timeline_time(new_start + duration)
-            self._apply_item_timeline_times(item, new_start, max(new_start + min_len, new_end))
-        elif mode == 'trim_start':
-            new_start = self._snap_timeline_time(current_time)
-            self._apply_item_timeline_times(item, min(max(0.0, new_start), item.end_time - min_len), item.end_time)
-        elif mode == 'trim_end':
-            new_end = self._snap_timeline_time(current_time)
-            self._apply_item_timeline_times(item, item.start_time, max(item.start_time + min_len, new_end))
-        self.refresh_overlay_preview()
-        self.refresh_overlay_timeline()
-        self.refresh_overlay_property_panel()
+        return overlay_on_overlay_timeline_drag(self, event)
 
     def on_overlay_timeline_release(self, event):
-        drag_state = getattr(self, '_overlay_timeline_drag', None)
-        if drag_state and drag_state.get('item_id'):
-            self.refresh_overlay_preview()
-            self.refresh_overlay_timeline()
-            self.refresh_overlay_property_panel()
-        self._overlay_timeline_drag = {'item_id': None, 'mode': None, 'press_time': 0.0, 'origin_start': 0.0, 'origin_end': 0.0}
+        return overlay_on_overlay_timeline_release(self, event)
 
     def _find_overlay_hit(self, x, y):
         selected = self.overlay_manager.get_selected()
