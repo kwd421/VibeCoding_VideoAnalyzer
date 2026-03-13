@@ -491,19 +491,70 @@ class CustomModelApp:
         self._overlay_timeline_cycle = {'key': None, 'index': 0, 'items': []}
         self._overlay_timeline_drag = {'item_id': None, 'mode': None, 'press_time': 0.0, 'origin_start': 0.0, 'origin_end': 0.0}
 
-        self.overlay_props_canvas = None
-        self.overlay_props_scroll = None
-        self.overlay_props_inner = None
-        self._overlay_props_window = None
-        self.overlay_visible_check = None
-        self.btn_overlay_forward = None
-        self.btn_overlay_backward = None
-        self.btn_overlay_front = None
-        self.btn_overlay_back = None
-        self.btn_apply_overlay_props = None
-        self.btn_delete_overlay = None
-        self.lbl_overlay_props = None
+        overlay_props_outer = tk.Frame(overlay_body, bg=C['bg2'], width=250)
+        overlay_props_outer.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))
+        overlay_props_outer.pack_propagate(False)
+        self.overlay_props_canvas = tk.Canvas(overlay_props_outer, bg=C['bg2'], highlightthickness=0, bd=0)
+        self.overlay_props_scroll = ttk.Scrollbar(overlay_props_outer, orient=tk.VERTICAL, command=self.overlay_props_canvas.yview)
+        self.overlay_props_inner = tk.Frame(self.overlay_props_canvas, bg=C['bg2'])
+        self.overlay_props_inner.bind('<Configure>', lambda e: self.overlay_props_canvas.configure(scrollregion=self.overlay_props_canvas.bbox('all')))
+        self._overlay_props_window = self.overlay_props_canvas.create_window((0, 0), window=self.overlay_props_inner, anchor='nw')
+        self.overlay_props_canvas.bind('<Configure>', lambda e: self.overlay_props_canvas.itemconfigure(self._overlay_props_window, width=e.width))
+        self.overlay_props_canvas.configure(yscrollcommand=self.overlay_props_scroll.set)
+        self.overlay_props_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.overlay_props_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        overlay_props = self.overlay_props_inner
+        tk.Label(overlay_props, text='오버레이 속성', bg=C['bg2'], fg=C['text'], font=('Noto Sans KR', 10, 'bold')).pack(anchor='w', padx=12, pady=(12, 8))
 
+        def _overlay_prop_row(parent, key, label_text):
+            row = tk.Frame(parent, bg=C['bg2'])
+            row.pack(fill=tk.X, padx=12, pady=3)
+            tk.Label(row, text=label_text, bg=C['bg2'], fg=C['text2'], width=9, anchor='w', font=_f).pack(side=tk.LEFT)
+            ent = tk.Entry(row, textvariable=self.overlay_prop_vars[key], bg=C['bg3'], fg=C['text'], relief='flat', bd=4, insertbackground=C['text'])
+            ent.pack(side=tk.RIGHT, fill=tk.X, expand=True)
+            self.overlay_prop_entries[key] = ent
+
+        _overlay_prop_row(overlay_props, 'text', '텍스트')
+        _overlay_prop_row(overlay_props, 'x', 'X 위치')
+        _overlay_prop_row(overlay_props, 'y', 'Y 위치')
+        _overlay_prop_row(overlay_props, 'width', '너비')
+        _overlay_prop_row(overlay_props, 'height', '높이')
+        _overlay_prop_row(overlay_props, 'start_time', '시작 시간')
+        _overlay_prop_row(overlay_props, 'end_time', '종료 시간')
+        _overlay_prop_row(overlay_props, 'opacity', '불투명도')
+        _overlay_prop_row(overlay_props, 'font_size', '글자 크기')
+        _overlay_prop_row(overlay_props, 'text_color', '글자색')
+        _overlay_prop_row(overlay_props, 'rotation', '회전')
+
+        self.overlay_visible_check = tk.Checkbutton(overlay_props, text='표시', variable=self.overlay_prop_vars['visible'], command=self.on_toggle_selected_overlay_visible, bg=C['bg2'], fg=C['text'], selectcolor=C['bg3'], activebackground=C['bg2'], activeforeground=C['text'], relief='flat', bd=0, highlightthickness=0, font=_f)
+        self.overlay_visible_check.pack(anchor='w', padx=12, pady=(6, 4))
+
+        layer_btn_row1 = tk.Frame(overlay_props, bg=C['bg2'])
+        layer_btn_row1.pack(fill=tk.X, padx=12, pady=(4, 3))
+        self.btn_overlay_forward = tk.Button(layer_btn_row1, text='한 단계 앞으로', command=lambda: self.reorder_selected_overlay('forward'), bg=C['bg3'], fg=C['text'], relief='flat', bd=0, padx=8, pady=6, cursor='hand2')
+        self.btn_overlay_forward.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
+        self.btn_overlay_backward = tk.Button(layer_btn_row1, text='한 단계 뒤로', command=lambda: self.reorder_selected_overlay('backward'), bg=C['bg3'], fg=C['text'], relief='flat', bd=0, padx=8, pady=6, cursor='hand2')
+        self.btn_overlay_backward.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(3, 0))
+
+        layer_btn_row2 = tk.Frame(overlay_props, bg=C['bg2'])
+        layer_btn_row2.pack(fill=tk.X, padx=12, pady=(0, 6))
+        self.btn_overlay_front = tk.Button(layer_btn_row2, text='맨 앞으로', command=lambda: self.reorder_selected_overlay('front'), bg=C['bg3'], fg=C['text'], relief='flat', bd=0, padx=8, pady=6, cursor='hand2')
+        self.btn_overlay_front.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
+        self.btn_overlay_back = tk.Button(layer_btn_row2, text='맨 뒤로', command=lambda: self.reorder_selected_overlay('back'), bg=C['bg3'], fg=C['text'], relief='flat', bd=0, padx=8, pady=6, cursor='hand2')
+        self.btn_overlay_back.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(3, 0))
+
+        self.btn_apply_overlay_props = tk.Button(overlay_props, text='속성 적용', command=self.apply_selected_overlay_properties, bg=C['accent'], fg='white', relief='flat', bd=0, padx=10, pady=6, cursor='hand2')
+        self.btn_apply_overlay_props.pack(fill=tk.X, padx=12, pady=(6, 6))
+        self.btn_delete_overlay = tk.Button(overlay_props, text='선택 오버레이 삭제', command=self.delete_selected_overlay, bg=C['red'], fg='white', relief='flat', bd=0, padx=10, pady=6, cursor='hand2')
+        self.btn_delete_overlay.pack(fill=tk.X, padx=12, pady=(0, 6))
+        self.lbl_overlay_props = tk.Label(overlay_props, text='선택된 오버레이가 없습니다', bg=C['bg2'], fg=C['text2'], anchor='w', justify=tk.LEFT, font=_f)
+        self.lbl_overlay_props.pack(fill=tk.X, padx=12, pady=(0, 12))
+        self.root.bind_all('<MouseWheel>', self._on_overlay_props_mousewheel, add='+')
+        self.root.bind_all('<Button-4>', self._on_overlay_props_mousewheel, add='+')
+        self.root.bind_all('<Button-5>', self._on_overlay_props_mousewheel, add='+')
+        self.refresh_overlay_property_panel()
+        
+        # ?먥븧??ZONE 3: ?몄뒪?숉꽣 ?⑤꼸 (Right) ?먥븧??
         inspector = tk.Frame(self.main_paned, bg=C['bg'])
         self.main_paned.add(inspector, minsize=280, width=340)
 
@@ -895,21 +946,12 @@ class CustomModelApp:
                 self.rebuild_tree_and_render()
             return "break"
 
-        def _on_delete(e):
-            if _is_editing():
-                return
-            if self.overlay_manager.selected_item_id is None:
-                return
-            self.delete_selected_overlay()
-            return "break"
-
         self.root.bind_all("<space>", _on_space)
         self.root.bind_all("<Left>",  _on_left)
         self.root.bind_all("<Right>", _on_right)
         self.root.bind_all("<Control-z>", _on_undo)
         self.root.bind_all("<Control-y>", _on_redo)
         self.root.bind_all("<Control-Z>", _on_redo) # Shift+Z
-        self.root.bind_all("<Delete>", _on_delete)
 
         # [?ъ슜???붿껌] ??씠??由ъ뒪?몄뿉 ?ъ빱?ㅺ? ?덉쓣 ??諛⑺뼢?ㅻ줈 硫붾돱媛 ?섏뼱媛??Tkinter 湲곕낯 ?숈옉 李⑤떒
         try:
@@ -1047,8 +1089,6 @@ class CustomModelApp:
             item.end_time = end_time
 
     def refresh_overlay_property_panel(self):
-        if getattr(self, 'lbl_overlay_props', None) is None:
-            return
         selected = self._get_any_overlay_item(self.overlay_manager.selected_item_id)
         if selected is None:
             for key, var in self.overlay_prop_vars.items():
@@ -1056,7 +1096,7 @@ class CustomModelApp:
                     var.set(False)
                 else:
                     var.set('')
-            self.lbl_overlay_props.config(text='??? ????? ????')
+            self.lbl_overlay_props.config(text='선택된 오버레이가 없습니다')
             for ent in self.overlay_prop_entries.values():
                 ent.configure(state=tk.DISABLED)
             for btn in [self.btn_apply_overlay_props, self.btn_overlay_forward, self.btn_overlay_backward, self.btn_overlay_front, self.btn_overlay_back, self.overlay_visible_check]:
@@ -1078,9 +1118,9 @@ class CustomModelApp:
         for key, value in values.items():
             self.overlay_prop_vars[key].set(value)
         self.overlay_prop_vars['visible'].set(bool(selected.visible))
-        vis_text = '??' if selected.visible else '??'
+        vis_text = '켜짐' if selected.visible else '꺼짐'
         name = selected.text if selected.type == 'text' else os.path.basename(selected.source or selected.id)
-        self.lbl_overlay_props.config(text=f'??: {name}\n??: {selected.type}\n???: {selected.layer_index}\n??: {vis_text}')
+        self.lbl_overlay_props.config(text=f'선택: {name}\n유형: {selected.type}\n레이어: {selected.layer_index}\n표시: {vis_text}')
         for key, ent in self.overlay_prop_entries.items():
             if key in ('text', 'font_size', 'text_color') and selected.type != 'text':
                 ent.configure(state=tk.DISABLED)
