@@ -317,11 +317,7 @@ def update_overlay_timeline_playhead(self, total_duration=None, width=None, row_
     if width is None:
         width = self._get_overlay_timeline_content_width()
     if total_duration is None:
-        total_duration = 1.0
-        if self.player and self.player.get_length() > 0:
-            total_duration = max(total_duration, self.player.get_length() / 1000.0)
-        for item in self._get_timeline_items():
-            total_duration = max(total_duration, item.end_time)
+        total_duration = self._get_overlay_timeline_total_duration()
     if total_tracks is None:
         total_tracks = max(1, len(self.overlay_manager.tracks) + (1 if self._get_subtitle_adapter_items() else 0))
     current_sec = self._get_overlay_time()
@@ -333,6 +329,29 @@ def update_overlay_timeline_playhead(self, total_duration=None, width=None, row_
         canvas.itemconfigure(self._overlay_timeline_playhead, fill='#FF453A', width=2)
     else:
         self._overlay_timeline_playhead = canvas.create_line(x, y1, x, y2, fill='#FF453A', width=2)
+    try:
+        canvas_width = max(1, canvas.winfo_width())
+        view_left = canvas.canvasx(0)
+        view_right = canvas.canvasx(canvas_width)
+        margin = max(48.0, canvas_width * 0.12)
+        target_left = None
+        if x > (view_right - margin):
+            target_left = x - (canvas_width - margin)
+        elif x < (view_left + margin):
+            target_left = x - margin
+        if target_left is not None:
+            scrollregion = canvas.cget('scrollregion')
+            if scrollregion:
+                parts = [float(v) for v in str(scrollregion).split()]
+                if len(parts) == 4:
+                    region_left, _, region_right, _ = parts
+                    total_span = max(1.0, region_right - region_left)
+                    max_left = max(region_left, region_right - canvas_width)
+                    target_left = min(max(region_left, target_left), max_left)
+                    fraction = 0.0 if total_span <= canvas_width else (target_left - region_left) / (total_span - canvas_width)
+                    canvas.xview_moveto(min(1.0, max(0.0, fraction)))
+    except Exception:
+        pass
 
 
 def on_overlay_timeline_press(self, event):

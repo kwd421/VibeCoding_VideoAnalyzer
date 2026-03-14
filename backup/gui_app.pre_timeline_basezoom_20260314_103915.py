@@ -1696,7 +1696,7 @@ class CustomModelApp:
             total_duration = max(total_duration, self.player.get_length() / 1000.0)
         for item in self._get_timeline_items():
             total_duration = max(total_duration, item.end_time)
-        return total_duration + 300.0
+        return total_duration
 
     def _get_timeline_zoom_factor(self):
         raw = getattr(self, 'overlay_zoom_var', None)
