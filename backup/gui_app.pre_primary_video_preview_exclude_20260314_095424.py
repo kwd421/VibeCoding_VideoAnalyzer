@@ -1244,12 +1244,7 @@ class CustomModelApp:
     def _get_active_video_item(self, time_sec):
         active_items = [
             item for item in self.overlay_manager.get_all_items()
-            if (
-                item.type == 'video'
-                and not item.extra.get('primary_video')
-                and item.start_time <= time_sec <= item.end_time
-                and item.source
-            )
+            if item.type == 'video' and item.start_time <= time_sec <= item.end_time and item.source
         ]
         if not active_items:
             return None
@@ -2009,7 +2004,7 @@ class CustomModelApp:
                 if primary_video_item is not None:
                     self.refresh_overlay_preview(0.0)
                 
-                self.lbl_status.config(text='영상 로드됨: ' + os.path.basename(p), fg=self.C['accent'])
+                self.lbl_status.config(text='?? ???: ' + os.path.basename(p), fg=self.C['accent'])
                 self.reset_action_button()
                 
                 if hasattr(self, 'preview_srt_path') and getattr(self, 'preview_srt_path') and os.path.exists(self.preview_srt_path):

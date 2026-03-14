@@ -93,6 +93,10 @@ def update_overlay_timeline_playhead(self, total_duration=None, width=None, row_
 
 
 def on_overlay_timeline_press(self, event):
+    try:
+        self.overlay_timeline_canvas.focus_set()
+    except Exception:
+        pass
     canvas_x = self.overlay_timeline_canvas.canvasx(event.x)
     shift_pressed = bool(event.state & 0x0001)
     hits = self._hit_overlay_timeline_items(canvas_x, event.y)

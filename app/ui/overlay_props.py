@@ -12,7 +12,7 @@ def refresh_overlay_property_panel(self):
                 var.set(False)
             else:
                 var.set('')
-        self.lbl_overlay_props.config(text='??? ????? ????')
+        self.lbl_overlay_props.config(text='선택된 오버레이가 없습니다')
         for ent in self.overlay_prop_entries.values():
             ent.configure(state='disabled')
         for btn in [self.btn_apply_overlay_props, self.btn_overlay_forward, self.btn_overlay_backward, self.btn_overlay_front, self.btn_overlay_back, self.overlay_visible_check]:
@@ -34,9 +34,9 @@ def refresh_overlay_property_panel(self):
     for key, value in values.items():
         self.overlay_prop_vars[key].set(value)
     self.overlay_prop_vars['visible'].set(bool(selected.visible))
-    vis_text = '??' if selected.visible else '??'
+    vis_text = '표시' if selected.visible else '숨김'
     name = selected.text if selected.type == 'text' else os.path.basename(selected.source or selected.id)
-    self.lbl_overlay_props.config(text=f'??: {name}\n??: {selected.type}\n???: {selected.layer_index}\n??: {vis_text}')
+    self.lbl_overlay_props.config(text=f'이름: {name}\n유형: {selected.type}\n레이어: {selected.layer_index}\n상태: {vis_text}')
     for key, ent in self.overlay_prop_entries.items():
         if key in ('text', 'font_size', 'text_color') and selected.type != 'text':
             ent.configure(state='disabled')
@@ -90,7 +90,7 @@ def apply_selected_overlay_properties(self):
                 raise ValueError
             selected.text_color = color
     except ValueError:
-        messagebox.showerror('??', '???? ??? ??? ???? ???.')
+        messagebox.showerror('오류', '오버레이 속성 값을 다시 확인해 주세요.')
         return
     self._invalidate_overlay_preview_cache(selected.id)
     self.refresh_overlay_preview()

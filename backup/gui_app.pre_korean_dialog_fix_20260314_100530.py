@@ -2009,7 +2009,7 @@ class CustomModelApp:
                 if primary_video_item is not None:
                     self.refresh_overlay_preview(0.0)
                 
-                self.lbl_status.config(text='영상 로드됨: ' + os.path.basename(p), fg=self.C['accent'])
+                self.lbl_status.config(text='?? ???: ' + os.path.basename(p), fg=self.C['accent'])
                 self.reset_action_button()
                 
                 if hasattr(self, 'preview_srt_path') and getattr(self, 'preview_srt_path') and os.path.exists(self.preview_srt_path):

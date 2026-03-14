@@ -1,6 +1,12 @@
+from tkinter import messagebox
+
+
 def delete_selected_overlay(self):
     selected = self.overlay_manager.get_selected()
     if selected is None or selected.type == 'subtitle':
+        return
+    if selected.extra.get('primary_video'):
+        messagebox.showinfo('안내', '메인영상은 삭제할 수 없습니다.')
         return
     item_id = selected.id
     self.overlay_manager.remove_item(item_id)

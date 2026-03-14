@@ -889,43 +889,6 @@ class CustomModelApp:
         self.refresh_overlay_property_panel()
         self.notebook.select(self.tab_overlay)
 
-    def _sync_primary_video_timeline_item(self, video_path):
-        if not video_path:
-            return None
-        media_info = {}
-        try:
-            media_info = self.video_editor.get_media_info(video_path) or {}
-        except Exception:
-            media_info = {}
-        duration = 0.0
-        try:
-            duration = float(media_info.get('total_duration', 0.0) or 0.0)
-        except Exception:
-            duration = 0.0
-        if duration <= 0.0 and self.player and self.player.get_length() > 0:
-            duration = max(duration, self.player.get_length() / 1000.0)
-        duration = max(0.1, duration)
-
-        primary_item = None
-        for item in self.overlay_manager.get_all_items():
-            if item.type == 'video' and item.extra.get('primary_video'):
-                primary_item = item
-                break
-
-        if primary_item is None:
-            primary_item = self.overlay_manager.create_video_clip(video_path, 0.0, duration, label=os.path.basename(video_path))
-            primary_item.extra['primary_video'] = True
-        else:
-            primary_item.source = video_path
-            primary_item.text = os.path.basename(video_path)
-            primary_item.start_time = 0.0
-            primary_item.end_time = max(primary_item.start_time + 0.1, duration)
-            primary_item.track_index = 0
-            primary_item.track_kind = 'video'
-            primary_item.visible = True
-        self.overlay_manager.normalize_track_layers(primary_item.track_index)
-        return primary_item
-
     def _fmt_overlay_prop(self, value, digits=2):
         try:
             return f"{float(value):.{digits}f}"
@@ -1244,12 +1207,7 @@ class CustomModelApp:
     def _get_active_video_item(self, time_sec):
         active_items = [
             item for item in self.overlay_manager.get_all_items()
-            if (
-                item.type == 'video'
-                and not item.extra.get('primary_video')
-                and item.start_time <= time_sec <= item.end_time
-                and item.source
-            )
+            if item.type == 'video' and item.start_time <= time_sec <= item.end_time and item.source
         ]
         if not active_items:
             return None
@@ -1986,15 +1944,10 @@ class CustomModelApp:
                 
             if self.player.load_video(p):
                 self.reset_for_new_video()
-                primary_video_item = None
                 try:
                     self._timeline_fps = float(self.video_editor.get_media_info(p).get('fps', 30.0) or 30.0)
                 except Exception:
                     self._timeline_fps = 30.0
-                try:
-                    primary_video_item = self._sync_primary_video_timeline_item(p)
-                except Exception:
-                    primary_video_item = None
                 def _resize():
                     w, h = self.player.get_video_resolution()
                     if w > 0 and h > 0:
@@ -2005,9 +1958,6 @@ class CustomModelApp:
                         self.refresh_overlay_preview()
                     self.video_canvas.pack_propagate(False)
                 self.root.after(500, _resize)
-                self.refresh_overlay_timeline()
-                if primary_video_item is not None:
-                    self.refresh_overlay_preview(0.0)
                 
                 self.lbl_status.config(text='영상 로드됨: ' + os.path.basename(p), fg=self.C['accent'])
                 self.reset_action_button()
