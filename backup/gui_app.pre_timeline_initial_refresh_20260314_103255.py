@@ -224,7 +224,6 @@ class CustomModelApp:
             'visible': tk.BooleanVar(value=True),
         }
         self.overlay_prop_entries = {}
-        self._overlay_timeline_canvas_size = None
         self._report_startup_progress(50, "Building interface...")
         self.setup_ui()
         self._report_startup_progress(75, "Connecting player...")
@@ -452,7 +451,6 @@ class CustomModelApp:
         self.notebook.bind('<<NotebookTabChanged>>', _on_tab_changed)
         self._build_overlay_tab_static(_f)
         self.overlay_zoom_combo.bind('<<ComboboxSelected>>', lambda e: self.refresh_overlay_timeline())
-        self.overlay_timeline_canvas.bind('<Configure>', self._on_overlay_timeline_canvas_configure, add='+')
         self.overlay_timeline_canvas.bind('<Button-1>', self.on_overlay_timeline_press)
         self.overlay_timeline_canvas.bind('<B1-Motion>', self.on_overlay_timeline_drag)
         self.overlay_timeline_canvas.bind('<ButtonRelease-1>', self.on_overlay_timeline_release)
@@ -1803,16 +1801,6 @@ class CustomModelApp:
     def _update_overlay_timeline_playhead(self, total_duration=None, width=None, row_h=68, ruler_h=24, top_pad=16, total_tracks=None):
         return overlay_update_overlay_timeline_playhead(self, total_duration=total_duration, width=width, row_h=row_h, ruler_h=ruler_h, top_pad=top_pad, total_tracks=total_tracks)
 
-    def _on_overlay_timeline_canvas_configure(self, event):
-        size = (
-            max(1, int(getattr(event, 'width', 0) or 0)),
-            max(1, int(getattr(event, 'height', 0) or 0)),
-        )
-        if size == self._overlay_timeline_canvas_size:
-            return
-        self._overlay_timeline_canvas_size = size
-        self.root.after_idle(self.refresh_overlay_timeline)
-
     def on_overlay_timeline_press(self, event):
         return overlay_on_overlay_timeline_press(self, event)
 
@@ -2017,13 +2005,8 @@ class CustomModelApp:
                         self.refresh_overlay_preview()
                     self.video_canvas.pack_propagate(False)
                 self.root.after(500, _resize)
-                try:
-                    self.root.update_idletasks()
-                except Exception:
-                    pass
                 self.refresh_overlay_timeline()
                 self.root.after_idle(self.refresh_overlay_timeline)
-                self.root.after(120, self.refresh_overlay_timeline)
                 if primary_video_item is not None:
                     self.refresh_overlay_preview(0.0)
                 
