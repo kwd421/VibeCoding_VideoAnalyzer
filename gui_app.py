@@ -209,6 +209,10 @@ class CustomModelApp:
         self._overlay_prop_refresh_job = None
         self._overlay_resize_dirty_item = None
         self._overlay_last_visible_signature = None
+        self._audio_clip_player = None
+        self._audio_clip_item_id = None
+        self._audio_clip_source = None
+        self._audio_clip_last_sync_ms = None
         self.overlay_prop_vars = {
             'text': tk.StringVar(value=''),
             'x': tk.StringVar(value=''),
@@ -263,6 +267,7 @@ class CustomModelApp:
 
             if self.player:
                 self.player.stop()
+            self._stop_audio_clip_playback()
         except Exception:
             pass
         finally:
@@ -821,6 +826,7 @@ class CustomModelApp:
         """Clear previous analysis state when selecting a new video."""
         self.stop_event.set()
         self.stop_event = threading.Event()
+        self._stop_audio_clip_playback()
         self.results_data = []
         self.tree.delete(*self.tree.get_children())
         self.progress_var.set(0)
@@ -1257,6 +1263,104 @@ class CustomModelApp:
             return None
         active_items.sort(key=lambda item: (item.track_index, item.layer_index, item.id))
         return active_items[0]
+
+    def _get_active_audio_item(self, time_sec):
+        active_items = [
+            item for item in self.overlay_manager.get_all_items()
+            if (
+                item.type == 'audio'
+                and item.visible
+                and item.start_time <= time_sec <= item.end_time
+                and item.source
+                and os.path.exists(item.source)
+            )
+        ]
+        if not active_items:
+            return None
+        active_items.sort(key=lambda item: (item.track_index, item.layer_index, item.id))
+        return active_items[0]
+
+    def _ensure_audio_clip_player(self):
+        if self._audio_clip_player is not None:
+            return self._audio_clip_player
+        player_instance = getattr(self.player, 'instance', None)
+        if player_instance is None:
+            return None
+        try:
+            self._audio_clip_player = player_instance.media_player_new()
+        except Exception:
+            self._audio_clip_player = None
+        return self._audio_clip_player
+
+    def _stop_audio_clip_playback(self):
+        player = self._audio_clip_player
+        if player is not None:
+            try:
+                player.stop()
+            except Exception:
+                pass
+        self._audio_clip_item_id = None
+        self._audio_clip_source = None
+        self._audio_clip_last_sync_ms = None
+
+    def _sync_audio_clip_playback(self, time_sec=None, force_seek=False):
+        if self._is_closing:
+            return
+        if time_sec is None:
+            time_sec = self._get_current_time_sec()
+        item = self._get_active_audio_item(time_sec)
+        player = self._ensure_audio_clip_player()
+        if player is None:
+            return
+        if item is None:
+            if self._audio_clip_item_id is not None:
+                self._stop_audio_clip_playback()
+            return
+        local_ms = max(0, int(round((time_sec - item.start_time) * 1000.0)))
+        should_play = bool(self.player and self.player.is_playing() and not self.is_seeking)
+        switched = item.id != self._audio_clip_item_id or item.source != self._audio_clip_source
+        if switched:
+            try:
+                media = self.player.instance.media_new(item.source)
+                player.set_media(media)
+            except Exception:
+                return
+            self._audio_clip_item_id = item.id
+            self._audio_clip_source = item.source
+            self._audio_clip_last_sync_ms = None
+            try:
+                player.play()
+            except Exception:
+                pass
+        try:
+            current_ms = player.get_time()
+        except Exception:
+            current_ms = -1
+        if switched or force_seek or current_ms < 0 or self._audio_clip_last_sync_ms is None or abs(current_ms - local_ms) > 250:
+            try:
+                if not player.is_playing():
+                    player.play()
+            except Exception:
+                pass
+            try:
+                player.set_time(local_ms)
+            except Exception:
+                pass
+            self._audio_clip_last_sync_ms = local_ms
+        if should_play:
+            try:
+                if not player.is_playing():
+                    player.play()
+            except Exception:
+                pass
+        else:
+            try:
+                player.pause()
+            except Exception:
+                try:
+                    player.set_pause(1)
+                except Exception:
+                    pass
 
     def _get_video_preview_signature(self, time_sec):
         item = self._get_active_video_item(time_sec)
@@ -2483,12 +2587,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             import traceback; traceback.print_exc()
             print(f'[ERROR] apply_preview_subtitles ??쎈솭: {e}')
     def toggle_play(self):
-        if self.player: is_p = self.player.toggle_play(); self.btn_play.config(text='일시정지' if is_p else '재생')
+        if self.player:
+            is_p = self.player.toggle_play()
+            self.btn_play.config(text='일시정지' if is_p else '재생')
+            self._sync_audio_clip_playback(force_seek=True)
     def skip_time(self, ms): 
         if self.player: self.player.skip(ms)
     def on_seek_start(self, e):
         self.is_seeking = True
         self._was_playing_before_seek = self.player.is_playing() if self.player else False
+        self._sync_audio_clip_playback(force_seek=True)
         if self.player:
             self.player.set_mute(True)
             if not self._was_playing_before_seek:
@@ -2506,6 +2614,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 self.player.pause() # ?癒?삋 ??깅뻻?類? ?怨밴묶????삠늺 ?類?
             # 筌앸맩??獒뺛끋????곸젫 ?????봺揶쎛 ??????됰선 ??꾩퍢????뺤쟿??
             self.root.after(100, lambda: self.player.set_mute(False) if self.player else None)
+        self._sync_audio_clip_playback(force_seek=True)
     def _update_seek_from_mouse(self, e):
         try:
             w = self.seek_bar.winfo_width()
@@ -2543,6 +2652,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             if self._smooth_ms >= 0 and total_ms > 0:
                 c_m, c_s = divmod(int(self._smooth_ms/1000), 60); t_m, t_s = divmod(int(total_ms/1000), 60); self.lbl_time.config(text=f"{c_m:02d}:{c_s:02d} / {t_m:02d}:{t_s:02d}")
                 self._refresh_overlay_time_state(curr_ms / 1000.0)
+                self._sync_audio_clip_playback(curr_ms / 1000.0)
                 self._update_overlay_timeline_playhead()
                 
                 # [??????遺욧퍕] ?袁⑹삺 ??源?餓λ쵐???癒?춵 筌≪뼐由?獄?揶쏅벡??(??곸젫 ?λ뜆?숃쳸? ??볧?????

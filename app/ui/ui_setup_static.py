@@ -107,7 +107,7 @@ def build_overlay_tab_static(self, body_font):
     self.subtitle_adapter_check.pack(side=tk.LEFT, padx=(8, 0))
     tk.Label(overlay_toolbar, text='\uBC30\uC728', bg=self.C['bg'], fg=self.C['text2'], font=body_font).pack(side=tk.LEFT, padx=(12, 4))
     self.overlay_zoom_var = tk.StringVar(value='1x')
-    self.overlay_zoom_combo = ttk.Combobox(overlay_toolbar, textvariable=self.overlay_zoom_var, state='readonly', width=6, values=('1x', '2x', '4x', '8x'))
+    self.overlay_zoom_combo = ttk.Combobox(overlay_toolbar, textvariable=self.overlay_zoom_var, state='readonly', width=6, values=('1x', '2x', '4x', '8x', '16x'))
     self.overlay_zoom_combo.pack(side=tk.LEFT)
     tk.Label(overlay_toolbar, text='\uC2A4\uB0C5', bg=self.C['bg'], fg=self.C['text2'], font=body_font).pack(side=tk.LEFT, padx=(12, 4))
     self.overlay_snap_var = tk.StringVar(value='0.1\uCD08')
