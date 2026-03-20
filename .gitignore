@@ -12,6 +12,7 @@ deprecated/
 .DS_Store
 *.log
 temp_preview.srt
+temp_preview_*.ass
 refactored_temp.wav
 
 # AI Models & Large Weights
