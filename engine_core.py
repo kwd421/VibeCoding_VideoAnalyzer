@@ -18,6 +18,7 @@ from faster_whisper import WhisperModel
 from silero_vad import load_silero_vad, get_speech_timestamps
 import imageio_ffmpeg
 import concurrent.futures
+from dataclasses import dataclass
 from config_models import AnalysisSettings, TranscriptSegment, TranscriptWord
 from text_sanitizer import TextSanitizer
 from audio_processor import AudioProcessor
@@ -34,13 +35,31 @@ except ImportError:
     HAS_WHISPERX = False
     print("[WARN] WhisperX module not found. Forced alignment feature is disabled.")
 
+
+@dataclass
+class RuntimeWord:
+    word: str
+    start: float
+    end: float
+
+
+@dataclass
+class RuntimeSegment:
+    text: str
+    start: float
+    end: float
+    words: list
+
 class HyperTranscriptionEngine:
     def __init__(self):
         self.base_dir = self._get_base_dir()
         self.model_id = "large-v3-turbo"
         self.ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
         self.fw_model = None
+        self.torch_whisper_pipe = None
+        self.torch_whisper_key = None
         self.vad_model = None
+        self.vad_device_info = None
         self.vision_processor = VisionProcessor(self._detect_best_device)
         self.clip_processor = None
         
@@ -48,7 +67,7 @@ class HyperTranscriptionEngine:
         total_cores = os.cpu_count() or 4
         self.cpu_cores = max(1, int(total_cores * 0.5))
         self.device_info = "auto"
-        self.align_models_cache = {}    # [캐싱] 언어별 WhisperX 정렬 모델
+        self.align_models_cache = {}    # [캐싱] (언어, 디바이스)별 WhisperX 정렬 모델
         
     def _get_base_dir(self):
         if getattr(sys, "frozen", False):
@@ -103,7 +122,36 @@ class HyperTranscriptionEngine:
         if "75" in device_mode: return max(1, int(total_cores * 0.75))
         return max(1, int(total_cores * 0.50)) # 기본값 50%
 
+    def _get_torch_whisper_model_name(self):
+        if self.model_id == "large-v3-turbo":
+            return "openai/whisper-large-v3-turbo"
+        return None
+
+    def _use_torch_whisper_backend(self, device_mode="auto"):
+        return self._detect_best_device(device_mode) == "mps" and self._get_torch_whisper_model_name() is not None
+
+    def _get_torch_whisper_pipeline(self, device_mode="auto"):
+        model_name = self._get_torch_whisper_model_name()
+        if model_name is None:
+            raise ValueError(f"MPS transcription backend does not support model '{self.model_id}'.")
+
+        cache_key = (model_name, "mps")
+        if self.torch_whisper_pipe is None or self.torch_whisper_key != cache_key:
+            from transformers import pipeline
+
+            self.torch_whisper_pipe = pipeline(
+                "automatic-speech-recognition",
+                model=model_name,
+                device="mps",
+            )
+            self.torch_whisper_key = cache_key
+            print(f"[INFO] Using torch Whisper pipeline on MPS: {model_name}")
+        return self.torch_whisper_pipe
+
     def get_model(self, device_mode="auto"):
+        if self._use_torch_whisper_backend(device_mode):
+            return self._get_torch_whisper_pipeline(device_mode)
+
         target_threads = self._get_target_cores(device_mode)
         
         # 모델 리로드 조건: 디바이스가 바뀌었거나, CPU 모드인데 쓰레드 설정이 달라진 경우
@@ -122,12 +170,50 @@ class HyperTranscriptionEngine:
             self.fw_model = WhisperModel(model_source, device=ct2_dev, compute_type=c_type, cpu_threads=threads_per_worker, num_workers=workers)
         return self.fw_model
 
+    def _transcribe_with_torch_whisper(self, audio_chunk, selected_lang, use_word_timestamps):
+        pipe = self._get_torch_whisper_pipeline("mps")
+        generate_kwargs = {
+            "task": "transcribe",
+        }
+        if selected_lang:
+            generate_kwargs["language"] = selected_lang
+
+        result = pipe(
+            np.asarray(audio_chunk, dtype=np.float32),
+            return_timestamps="word" if use_word_timestamps else True,
+            generate_kwargs=generate_kwargs,
+        )
+
+        text = (result.get("text") or "").strip()
+        if not text:
+            return []
+
+        if use_word_timestamps:
+            words = []
+            for chunk in result.get("chunks", []):
+                word = (chunk.get("text") or "").strip()
+                timestamp = chunk.get("timestamp") or ()
+                if not word or len(timestamp) != 2:
+                    continue
+                w_start, w_end = timestamp
+                if w_start is None or w_end is None or w_end <= w_start:
+                    continue
+                words.append(RuntimeWord(word=word, start=float(w_start), end=float(w_end)))
+
+            if words:
+                merged_text = " ".join(w.word for w in words).strip()
+                return [RuntimeSegment(text=merged_text or text, start=words[0].start, end=words[-1].end, words=words)]
+
+        duration = len(audio_chunk) / 16000.0
+        return [RuntimeSegment(text=text, start=0.0, end=duration, words=[])]
+
     def set_model_id(self, new_model_id):
         if self.model_id != new_model_id:
             self.model_id = new_model_id
             self.fw_model = None  # Force reload model
 
     def get_vad_model(self, device_mode="auto"):
+        best_dev = self._detect_best_device(device_mode)
         if self.vad_model is None:
             target_threads = self._get_target_cores(device_mode)
             torch.set_num_threads(target_threads)
@@ -136,11 +222,11 @@ class HyperTranscriptionEngine:
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=UserWarning)
                 self.vad_model = load_silero_vad()
-            
-            # 모델을 하드웨어 장치에 탑재
-            best_dev = self._detect_best_device(device_mode)
-            if best_dev != "cpu":
-                self.vad_model = self.vad_model.to(best_dev)
+            self.vad_device_info = "cpu"
+
+        if self.vad_device_info != best_dev:
+            self.vad_model = self.vad_model.to(best_dev)
+            self.vad_device_info = best_dev
                 
         return self.vad_model
 
@@ -157,16 +243,18 @@ class HyperTranscriptionEngine:
         # [시니어] 언어 코드가 불분명하면 ko로 강제 매핑
         lang_code = language_code if language_code and language_code != "auto" else "ko"
         
-        if lang_code not in self.align_models_cache:
+        cache_key = (lang_code, best_device)
+
+        if cache_key not in self.align_models_cache:
             try:
                 print(f"[INFO] WhisperX alignment 모델 로딩 시작: {lang_code} ({best_device})")
                 model_a, metadata = whisperx.load_align_model(language_code=lang_code, device=best_device)
-                self.align_models_cache[lang_code] = (model_a, metadata)
+                self.align_models_cache[cache_key] = (model_a, metadata)
             except Exception as e:
                 print(f"[ERROR] WhisperX alignment 모델 로드 실패 ({lang_code}): {e}")
                 return None, None
         
-        return self.align_models_cache[lang_code]
+        return self.align_models_cache[cache_key]
 
     def load_audio_to_memory(self, video_path):
         return AudioProcessor.load_audio_to_memory(video_path, self.ffmpeg_exe)
@@ -289,18 +377,22 @@ class HyperTranscriptionEngine:
                         )
                             
                         try:
-                            segs, _ = model.transcribe(sub_chunk, **transcribe_kwargs)
+                            if self._use_torch_whisper_backend(device_mode):
+                                segs_list = self._transcribe_with_torch_whisper(sub_chunk, selected_lang, use_word_timestamps)
+                            else:
+                                segs, _ = model.transcribe(sub_chunk, **transcribe_kwargs)
+                                segs_list = list(segs)
                         except Exception as e:
                             err_text = str(e).lower()
-                            if runtime_whisper_vad["enabled"] and any(token in err_text for token in ["onnx", "vad", "ort"]):
+                            if (not self._use_torch_whisper_backend(device_mode)) and runtime_whisper_vad["enabled"] and any(token in err_text for token in ["onnx", "vad", "ort"]):
                                 runtime_whisper_vad["enabled"] = False
                                 print(f"[WARN] Whisper VAD failed, retrying without internal VAD: {e}")
                                 transcribe_kwargs["vad_filter"] = False
                                 transcribe_kwargs["vad_parameters"] = None
                                 segs, _ = model.transcribe(sub_chunk, **transcribe_kwargs)
+                                segs_list = list(segs)
                             else:
                                 raise
-                        segs_list = list(segs)
                         
                         # [WhisperX] WhisperX forced alignment로 단어 타임스탬프 보정
                         if HAS_WHISPERX and use_whisperx_align and use_word_timestamps and segs_list:

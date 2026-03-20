@@ -3,7 +3,7 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk, font as tkfont
+from tkinter import colorchooser, filedialog, messagebox, ttk, font as tkfont
 import numpy as np
 import vlc
 from engine_core import HyperTranscriptionEngine, HAS_WHISPERX
@@ -178,7 +178,7 @@ class CustomModelApp:
         self._report_startup_progress(50, "Building interface...")
         self.setup_ui()
         self._report_startup_progress(75, "Connecting player...")
-        self.player = VideoPlayer(self.video_canvas.winfo_id())
+        self.player = VideoPlayer(self.video_canvas)
         self.bind_keys()
         self.bind_events()
         self._report_startup_progress(90, "Finalizing startup...")
@@ -228,7 +228,7 @@ class CustomModelApp:
             if not self.root.winfo_exists():
                 return
             self.root.after(0, lambda: self._run_ui_callback(callback))
-        except tk.TclError:
+        except (tk.TclError, RuntimeError):
             pass
 
     def _run_ui_callback(self, callback):
@@ -238,7 +238,7 @@ class CustomModelApp:
             if not self.root.winfo_exists():
                 return
             callback()
-        except tk.TclError:
+        except (tk.TclError, RuntimeError):
             pass
 
     def bind_events(self):
@@ -275,6 +275,24 @@ class CustomModelApp:
     def setup_ui(self):
         C = self.C
         _f = ('Noto Sans KR', 11); _fb = ('Noto Sans KR', 11, 'bold')
+        def _wheel_units(event):
+            if hasattr(event, 'num'):
+                if event.num == 4:
+                    return -1
+                if event.num == 5:
+                    return 1
+            if sys.platform == "darwin":
+                if event.delta == 0:
+                    return 0
+                return -1 if event.delta > 0 else 1
+            return int(-1 * (event.delta / 120))
+        def _bind_mousewheel_recursive(widget, handler):
+            try:
+                widget.bind('<MouseWheel>', handler, add='+')
+            except Exception:
+                pass
+            for child in widget.winfo_children():
+                _bind_mousewheel_recursive(child, handler)
         def _hover(btn, n, h):
             btn.bind('<Enter>', lambda e: btn.config(bg=h))
             btn.bind('<Leave>', lambda e: btn.config(bg=n))
@@ -379,8 +397,11 @@ class CustomModelApp:
         insp_scroll.bind('<Configure>', lambda e: insp_scroll.itemconfig('inner', width=e.width))
         insp_scroll.configure(yscrollcommand=insp_sb.set)
         insp_sb.pack(side=tk.RIGHT, fill=tk.Y); insp_scroll.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        inspector.bind('<Enter>', lambda e: insp_scroll.bind_all('<MouseWheel>', lambda ev: insp_scroll.yview_scroll(int(-1*(ev.delta/120)), 'units')))
-        inspector.bind('<Leave>', lambda e: insp_scroll.unbind_all('<MouseWheel>'))
+        def _scroll_inspector(ev):
+            units = _wheel_units(ev)
+            if units != 0:
+                insp_scroll.yview_scroll(units, 'units')
+                return 'break'
         
         # 카드 유틸 (그림자는 하단에 1px 두께 라벨 추가 꼼수로 구현)
         def _card(parent, title=''):
@@ -504,7 +525,7 @@ class CustomModelApp:
         self.sub_color_f = tk.StringVar(value='#FFFFFF')
         r = _st_row('🎨 글자 색상')
         def _pick_f():
-            c = tk.colorchooser.askcolor(initialcolor=self.sub_color_f.get())[1]
+            c = colorchooser.askcolor(initialcolor=self.sub_color_f.get())[1]
             if c: self.sub_color_f.set(c); _update_sub()
         tk.Button(r, text=' 색상 선택 ', command=_pick_f, bg=C['bg3'], fg=C['text'], relief='flat', padx=12, pady=2, font=_f, cursor='hand2').pack(side=tk.LEFT)
         tk.Label(r, textvariable=self.sub_color_f, bg=C['bg'], fg=C['text2'], font=_f).pack(side=tk.LEFT, padx=15)
@@ -519,7 +540,7 @@ class CustomModelApp:
         self.sub_color_o = tk.StringVar(value='#000000')
         r = _st_row('🎨 테두리 색상')
         def _pick_o():
-            c = tk.colorchooser.askcolor(initialcolor=self.sub_color_o.get())[1]
+            c = colorchooser.askcolor(initialcolor=self.sub_color_o.get())[1]
             if c: self.sub_color_o.set(c); _update_sub()
         tk.Button(r, text=' 색상 선택 ', command=_pick_o, bg=C['bg3'], fg=C['text'], relief='flat', padx=12, pady=2, font=_f, cursor='hand2').pack(side=tk.LEFT)
         tk.Label(r, textvariable=self.sub_color_o, bg=C['bg'], fg=C['text2'], font=_f).pack(side=tk.LEFT, padx=15)
@@ -534,7 +555,7 @@ class CustomModelApp:
         self.sub_color_s = tk.StringVar(value='#000000')
         r = _st_row('🎨 그림자 색상')
         def _pick_s():
-            c = tk.colorchooser.askcolor(initialcolor=self.sub_color_s.get())[1]
+            c = colorchooser.askcolor(initialcolor=self.sub_color_s.get())[1]
             if c: self.sub_color_s.set(c); _update_sub()
         tk.Button(r, text=' 색상 선택 ', command=_pick_s, bg=C['bg3'], fg=C['text'], relief='flat', padx=12, pady=2, font=_f, cursor='hand2').pack(side=tk.LEFT)
         tk.Label(r, textvariable=self.sub_color_s, bg=C['bg'], fg=C['text2'], font=_f).pack(side=tk.LEFT, padx=15)
@@ -567,7 +588,12 @@ class CustomModelApp:
 
         # [Ctrl+휠] 자막 시작/종료 시간 ±50ms 미세 조정 (Apple HIG)
         def _on_ctrl_wheel(e):
-            if not (e.state & 0x4): return # Ctrl 안 눌림 -> 기본 스크롤 허용
+            if not (e.state & 0x4):
+                units = _wheel_units(e)
+                if units != 0:
+                    self.tree.yview_scroll(units, 'units')
+                    return 'break'
+                return
             
             # [사용자 요청] Ctrl 눌린 경우, 시간 조절 가능 영역이 아니더라도 스크롤 차단
             item = self.tree.identify_row(e.y)
@@ -605,6 +631,7 @@ class CustomModelApp:
                 except Exception as e: print(f'[WARN] Ctrl+휠 시간 조절 오류: {e}')
             return 'break' # Ctrl 눌린 상태에선 조절 성공 여부와 무관하게 스크롤 방지
         self.tree.bind('<MouseWheel>', _on_ctrl_wheel)
+        _bind_mousewheel_recursive(inspector, _scroll_inspector)
 
 
         
@@ -643,6 +670,13 @@ class CustomModelApp:
                          yscrollcommand=scrollbar.set, spacing1=4, spacing3=4, padx=10, pady=6, bd=0)
         text_w.pack(fill=tk.BOTH, expand=True)
         scrollbar.config(command=text_w.yview)
+        def _scroll_font_list(event):
+            units = -1 if event.delta > 0 else 1 if event.delta < 0 else 0
+            if units != 0:
+                text_w.yview_scroll(units, 'units')
+                return 'break'
+        text_w.bind('<MouseWheel>', _scroll_font_list)
+        scrollbar.bind('<MouseWheel>', _scroll_font_list)
         
         def _select_font(fname):
             self._sub_font_name.set(fname)
@@ -711,6 +745,10 @@ class CustomModelApp:
         self.root.bind_all("<Control-z>", _on_undo)
         self.root.bind_all("<Control-y>", _on_redo)
         self.root.bind_all("<Control-Z>", _on_redo) # Shift+Z
+        if sys.platform == "darwin":
+            self.root.bind_all("<Command-z>", _on_undo)
+            self.root.bind_all("<Command-y>", _on_redo)
+            self.root.bind_all("<Command-Shift-z>", _on_redo)
 
         # [사용자 요청] 탭이나 리스트에 포커스가 있을 때 방향키로 메뉴가 넘어가는 Tkinter 기본 동작 차단
         try:
@@ -756,32 +794,43 @@ class CustomModelApp:
         p = filedialog.askopenfilename(filetypes=[("Video files", "*.mp4 *.avi *.mkv *.mov *.flv")])
         if p:
             self.current_video_path = p
-            
+
             # 기존에 로드된 자막 파일 연결 끊기
             if hasattr(self, 'preview_srt_path'):
                 self.preview_srt_path = None
-                
-            if self.player.load_video(p):
-                self.reset_for_new_video()
-                def _resize():
-                    w, h = self.player.get_video_resolution()
-                    if w > 0 and h > 0:
-                        self._video_aspect = h / w  # 영상 비율 저장
-                        cw = self.video_canvas.winfo_width()
-                        if cw < 10: cw = 500
-                        new_h = int(cw * self._video_aspect)
-                        if new_h > 10: self.video_canvas.config(height=new_h)
-                    self.video_canvas.pack_propagate(False)
-                self.root.after(500, _resize)
-                
-                self.lbl_status.config(text="영상 로드됨: " + os.path.basename(p), fg=self.C['accent'])
-                self.reset_action_button()
-                
-                if hasattr(self, 'preview_srt_path') and getattr(self, 'preview_srt_path') and os.path.exists(self.preview_srt_path):
-                    self.root.after(300, self.apply_preview_subtitles)
-            else:
-                from tkinter import messagebox
-                messagebox.showerror("Error", "영상을 불러올 수 없습니다.")
+
+            def _load_selected_video():
+                try:
+                    self.root.deiconify()
+                    self.root.lift()
+                    self.root.focus_force()
+                except Exception:
+                    pass
+                self.root.update_idletasks()
+
+                if self.player.load_video(p):
+                    self.reset_for_new_video()
+                    def _resize():
+                        w, h = self.player.get_video_resolution()
+                        if w > 0 and h > 0:
+                            self._video_aspect = h / w  # 영상 비율 저장
+                            cw = self.video_canvas.winfo_width()
+                            if cw < 10: cw = 500
+                            new_h = int(cw * self._video_aspect)
+                            if new_h > 10: self.video_canvas.config(height=new_h)
+                        self.video_canvas.pack_propagate(False)
+                    self.root.after(500, _resize)
+                    
+                    self.lbl_status.config(text="영상 로드됨: " + os.path.basename(p), fg=self.C['accent'])
+                    self.reset_action_button()
+                    
+                    if hasattr(self, 'preview_srt_path') and getattr(self, 'preview_srt_path') and os.path.exists(self.preview_srt_path):
+                        self.root.after(300, self.apply_preview_subtitles)
+                else:
+                    from tkinter import messagebox
+                    messagebox.showerror("Error", "영상을 불러올 수 없습니다.")
+
+            self.root.after(50, _load_selected_video)
 
 
     def on_stop_action(self):
@@ -1203,6 +1252,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     def update_loop(self):
         if self.player:
+            self.player.sync_video_container()
             if not self.is_seeking:
                 pos = self.player.get_position()
                 if pos >= 0: self.seek_var.set(pos * 1000)

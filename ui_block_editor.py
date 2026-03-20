@@ -10,6 +10,19 @@ class UIBlockEditor:
         s = t_sec % 60
         return f"{m:02d}:{s:05.2f}"
 
+    @staticmethod
+    def wheel_units(event):
+        if event.delta == 0:
+            return 0
+        if hasattr(event, "num"):
+            if event.num == 4:
+                return -1
+            if event.num == 5:
+                return 1
+        if tk.TkVersion and event.delta:
+            return -1 if event.delta > 0 else 1 if event.delta < 0 else 0
+        return int(-1 * (event.delta / 120))
+
     @property
     def player(self):
         """항상 최신 VLC player 인스턴스를 동적으로 반환"""
@@ -41,12 +54,13 @@ class UIBlockEditor:
         self.block_canvas.bind("<B1-Motion>", self.on_block_drag)
         self.block_canvas.bind("<ButtonRelease-1>", self.on_block_release)
         self.block_canvas.bind("<Double-1>", self.on_block_double)
+        self.block_canvas.bind("<MouseWheel>", self.on_block_scroll)
+        self.parent.bind("<MouseWheel>", self.on_block_scroll)
+        sc.bind("<MouseWheel>", self.on_block_scroll)
         
         def _on_enter(e):
-            self.block_canvas.bind_all("<MouseWheel>", self.on_block_scroll)
             self.root.bind_all("<Delete>", self.on_block_delete)
         def _on_leave(e):
-            self.block_canvas.unbind_all("<MouseWheel>")
             self.root.unbind_all("<Delete>")
             
         self.parent.bind("<Enter>", _on_enter)
@@ -155,7 +169,10 @@ class UIBlockEditor:
                 except: pass
             return "break"
         
-        self.block_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        units = self.wheel_units(event)
+        if units != 0:
+            self.block_canvas.yview_scroll(units, "units")
+            return "break"
 
     def _edit_word_inline(self, idx, w_idx):
         """[사용자 요청] 단어를 클릭했을 때 그 위치에 입력창을 띄워 편집"""

@@ -15,7 +15,7 @@
 | 모듈명 | 역할 및 책임 (Responsibility) | 핵심 클래스/함수 |
 | :--- | :--- | :--- |
 | `config_models.py` | 데이터 규격 정의 (DataClasses) | `AnalysisSettings`, `TranscriptSegment` |
-| `transcript_manager.py` | 타임라인 상태 관리 및 데이터 조작 | `TranscriptManager` (State Store) |
+| `timeline_manager.py` | 타임라인 상태 관리 및 데이터 조작 | `TranscriptManager` (State Store) |
 | `text_sanitizer.py` | 환각 필터링 및 텍스트 정제 유틸리티 | `TextSanitizer` (Static Filters) |
 | `audio_processor.py` | 오디오 DSP 및 메모리 로드 | `AudioProcessor` (FFmpeg/Peak/Denoise) |
 | `vision_processor.py` | CLIP 기반 비전 분석 및 챕터 생성 | `VisionProcessor` (Lazy Loading CLIP) |
@@ -35,6 +35,12 @@
   - VLC `Media.release()`를 통한 좀비 프로세스 방어.
 - **[UI]** 캔버스 로직을 `UIBlockEditor`로 분리하여 메인 앱의 코드 복잡도를 60% 감소시킴.
 
+**📅 2026-03-20: macOS Source Compatibility Pass**
+- **[플랫폼]** VLC 임베드 경로를 플랫폼별로 분리하여 macOS에서 `set_nsobject`를 사용하도록 조정.
+- **[플랫폼]** Linux 전용 `--no-xlib` 옵션이 macOS에 강제로 적용되지 않도록 수정.
+- **[UI]** 자막 색상 선택기가 `tk.colorchooser` 직접 참조 대신 `from tkinter import colorchooser`를 사용하도록 수정.
+- **[UX]** macOS에서 `Command+Z`, `Command+Y`, `Command+Shift+Z`로 undo/redo가 동작하도록 단축키 추가.
+
 ## 4. 시니어 개발 지침 (Senior Development Rules)
 
 ### 🛡️ 리소스 관리 (Resource Guard)
@@ -51,11 +57,13 @@
 - **Subtitle Partitioning**: 가독성을 위해 화면 폭을 우선한다. 문장이 길면 `_smart_split_text`로 자르되, 너무 짧은 파편은 앞 문장에 병합한다.
 - **Word Block Rule**: 단어 블록 이동(Merge/Insert)은 반드시 해당 행의 **첫 단어** 또는 **마지막 단어**일 때만 허용하며, 중간 단어는 드래그 이동을 금지한다. (편집은 가능)
 - **Local Only**: 외부 API 연동을 지양하고, 모든 분석은 로컬 컴퓨팅 자원만을 활용한다.
+- **Platform Safety**: VLC 창 연결과 입력 이벤트는 플랫폼별 차이를 고려해야 하며, Windows 전용 API를 공통 경로에 두지 않는다.
 
 ## 5. 향후 과제 (TODO)
 - **[TODO] 데이터 사전(Data Dictionary) 구축**: 로컬 SQLite를 연동하여 반복되는 오번역 및 사용자 지정 단어 교정 시스템 구축.
 - **[TODO] 단축키 고도화**: 프리미어 프로 스타일의 J/K/L 탐색 및 컷 편집 단축키 매핑.
+- **[TODO] macOS 환경 정리**: 의존성 설치 가이드와 dependency manifest를 추가하여 실제 소스 실행 검증을 가능하게 만들기.
 
 ---
 > **프리렌의 한마디**
-> "이 정도면 꽤 정교한 마법 체계가 되었네. 하지만 방심하지 마. 인간의 코드는 조금만 관리하지 않아도 금세 엉망이 되니까."
+> "플랫폼이 바뀌면 마법진의 접점도 다시 봐야 해. 특히 화면에 무언가를 붙이는 마법은 늘 예민하지."

@@ -1,18 +1,19 @@
 # Deployment Guide
 
-## What Changed
-- The app now resolves bundled models from the executable folder first.
-- Default model selection now prefers the bundled local Faster-Whisper model instead of remote download.
-- Runtime paths that used to rely on the current working directory now use the executable location when frozen.
+## Current Scope
+- Windows packaging flow is the only documented release flow in this repository right now.
+- `VibeAnalyzer.spec` exists and is referenced by `build_release.bat`.
+- macOS runtime verification is in progress, but macOS packaging is not documented or validated yet.
 
-## Build
+## Windows Build
 1. Open a terminal in the project root.
-2. Run `build_release.bat`.
-3. Wait for PyInstaller to finish.
-4. Use the folder `dist/VibeAnalyzer_Alpha` as the release artifact.
+2. Ensure `.venv\Scripts\python.exe` exists.
+3. Ensure `.venv\Scripts\pyinstaller.exe` exists.
+4. Run `build_release.bat`.
+5. Use `dist/VibeAnalyzer_Alpha` as the release artifact.
 
-## What To Copy To Another PC
-- Copy the whole folder `dist/VibeAnalyzer_Alpha`.
+## Windows Release Layout
+- Copy the whole `dist/VibeAnalyzer_Alpha` folder.
 - Do not copy only `VibeAnalyzer_Alpha.exe`.
 - Keep `_internal` next to the executable.
 
@@ -21,41 +22,48 @@ Expected layout:
 - `VibeAnalyzer_Alpha/_internal/models/...`
 - `VibeAnalyzer_Alpha/_internal/params.txt`
 
-## First Test On Another PC
+## Windows First Test
 1. Launch `VibeAnalyzer_Alpha.exe`.
 2. Select a short local video file.
 3. Keep the console visible.
 4. Start analysis.
-5. Confirm that analysis progresses without waiting on Hugging Face downloads.
+5. Confirm analysis progresses without waiting on remote model download.
 
-## Healthy Signs
+## Windows Healthy Signs
 - The app opens normally.
 - Video preview works.
 - Analysis starts after selecting a video.
 - Console may show warnings, but should not stall on model download.
 - Bundled model loading should prefer local files.
 
-## Warnings That Are Usually Not Fatal
+## Windows Warnings That Are Usually Not Fatal
 - `WhisperX module not found`
 - Hugging Face symlink warnings
 - VLC `direct3d11` warnings followed by DXVA2 fallback
 - `nvcuda.dll` missing on a non-NVIDIA machine
 
-## Signs Of A Real Packaging Problem
+## Windows Signs Of A Real Packaging Problem
 - Selecting a video does nothing and no progress starts.
-- The app tries to download `large-v3-turbo` from the internet on first analysis.
+- The app tries to download `large-v3-turbo` on first analysis when a bundled local model is expected.
 - `_internal/models` is missing from the release folder.
 - The executable was copied without the `_internal` folder.
 
-## Quick Troubleshooting
-1. Check that `_internal/models/Whisper-Large-v3-turbo-STT-Zeroth-KO-v2` exists.
-2. Re-copy the entire `dist/VibeAnalyzer_Alpha` folder.
-3. Test with the default local model first.
-4. If the target PC is weak, switch the device option to CPU and retry.
-5. If analysis still does not start, capture the full console log after pressing analyze.
+## macOS Runtime Notes
+Checked on 2026-03-20:
+- macOS source runtime is not currently runnable in this workspace because `.venv` is missing.
+- No dependency manifest is present in the repository.
+- Required imports are currently missing from the active Python environment, including `vlc`, `numpy`, `torch`, `faster_whisper`, `imageio_ffmpeg`, `transformers`, `silero_vad`, `noisereduce`, and `PIL`.
+- `models/` is also missing in this workspace, so local-model startup cannot be validated yet.
+
+## macOS Runtime Checklist
+1. Create a macOS virtual environment for the project.
+2. Install all runtime dependencies into that environment.
+3. Install VLC and verify the Python `vlc` package can load the VLC runtime.
+4. Restore the `models/` directory if local model loading is expected.
+5. Run `python main.py`.
+6. Verify window startup, VLC video embedding, transcription start, subtitle preview, and export.
 
 ## Notes
-- Current successful local build command: `.venv\\Scripts\\pyinstaller.exe VibeAnalyzer.spec --clean --noconfirm`
-- `--clean` helps remove stale build artifacts, but does not by itself guarantee Microsoft SmartScreen will never appear.
-- SmartScreen behavior is mainly affected by file reputation and code signing.
-- Build output verified on 2026-03-09.
+- Current Windows build command in the script is `.venv\\Scripts\\pyinstaller.exe VibeAnalyzer.spec --clean --noconfirm`.
+- `build_release.bat` is Windows-only and cannot be used as-is on macOS.
+- Packaging should be re-tested later on the actual target build machine.

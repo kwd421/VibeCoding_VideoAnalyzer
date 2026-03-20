@@ -1,4 +1,5 @@
 __pycache__/
+.venv/
 deprecated/
 *.wav
 *.srt
@@ -8,6 +9,7 @@ deprecated/
 *.mov
 .vscode/
 .idea/
+.DS_Store
 *.log
 temp_preview.srt
 refactored_temp.wav

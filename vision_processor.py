@@ -13,15 +13,21 @@ class VisionProcessor:
     def __init__(self, device_detector):
         self.clip_model = None
         self.clip_processor = None
+        self.clip_model_key = None
         self.device_detector = device_detector
 
     def get_clip_model(self, device_mode="auto"):
         """[시니어 최적화] CLIP 모델 Lazy Loading (필요할 때만 로드)"""
+        model_name = "openai/clip-vit-base-patch32"
+        best_dev = self.device_detector(device_mode)
+        cache_key = (model_name, best_dev)
         if self.clip_model is None:
-            model_name = "openai/clip-vit-base-patch32"
-            best_dev = self.device_detector(device_mode)
             self.clip_model = CLIPModel.from_pretrained(model_name).to(best_dev)
             self.clip_processor = CLIPProcessor.from_pretrained(model_name)
+            self.clip_model_key = cache_key
+        elif self.clip_model_key != cache_key:
+            self.clip_model = self.clip_model.to(best_dev)
+            self.clip_model_key = cache_key
         return self.clip_model, self.clip_processor
 
     def detect_scenes_clip_stream(self, video_path, labels, stop_event, ffmpeg_exe, interval=10, options=None):
