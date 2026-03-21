@@ -15,6 +15,7 @@ from timeline_manager import TranscriptManager
 from event_dispatcher import EventEmitter
 from analysis_controller import AnalysisController
 from ui_block_editor import UIBlockEditor
+from transcription_backends import BACKEND_LABELS, mode_from_label
 
 class LblMarquee(tk.Canvas):
     def __init__(self, parent, text="", font=('Noto Sans KR', 11), fg='#34C759', bg='#FFFFFF', height=30):
@@ -424,7 +425,7 @@ class CustomModelApp:
         self.ai_model_var.trace_add('write', lambda *_: self.reset_action_button())
         _sep(c1)
         r = _row(c1); tk.Label(r, text='가속 장치', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
-        self.device_var = tk.StringVar(value='CPU (50%)'); ttk.Combobox(r, textvariable=self.device_var, values=['?? ?? (auto)', 'NVIDIA (cuda)', 'Apple Mac (mps)', 'CPU (25%)', 'CPU (50%)', 'CPU (75%)'], state='readonly', width=14).pack(side=tk.RIGHT)
+        self.device_var = tk.StringVar(value='CPU (50%)'); ttk.Combobox(r, textvariable=self.device_var, values=BACKEND_LABELS, state='readonly', width=18).pack(side=tk.RIGHT)
         r = _row(c1); tk.Label(r, text='언어', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
         self.lang_var = tk.StringVar(value='한국어 (ko)'); self.lang_combo = ttk.Combobox(r, textvariable=self.lang_var, values=['한국어 (ko)', '영어 (en)', '일본어 (ja)', '중국어 (zh)', '자동 감지 (auto)'], state='readonly', width=12); self.lang_combo.pack(side=tk.RIGHT)
         
@@ -851,13 +852,7 @@ class CustomModelApp:
         except: min_sil_ms, pad_ms = 2000, 250
         
         device_val = self.device_var.get()
-        if "auto" in device_val: mapped_dev = "auto"
-        elif "cuda" in device_val: mapped_dev = "cuda"
-        elif "mps" in device_val: mapped_dev = "mps"
-        elif "25%" in device_val: mapped_dev = "cpu_25"
-        elif "50%" in device_val: mapped_dev = "cpu_50"
-        elif "75%" in device_val: mapped_dev = "cpu_75"
-        else: mapped_dev = "cpu"
+        mapped_dev = mode_from_label(device_val)
 
         analysis_options = AnalysisSettings(
             beam_size=self.beam_size_var.get(),

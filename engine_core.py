@@ -23,6 +23,14 @@ from config_models import AnalysisSettings, TranscriptSegment, TranscriptWord
 from text_sanitizer import TextSanitizer
 from audio_processor import AudioProcessor
 from vision_processor import VisionProcessor
+from transcription_backends import backend_kind
+
+try:
+    from pywhispercpp.model import Model as WhisperCppModel
+    HAS_PYWHISPERCPP = True
+except ImportError:
+    WhisperCppModel = None
+    HAS_PYWHISPERCPP = False
 # [시니어] WhisperX 정밀 정렬 (Optional Dependency)
 try:
     import whisperx
@@ -58,6 +66,10 @@ class HyperTranscriptionEngine:
         self.fw_model = None
         self.torch_whisper_pipe = None
         self.torch_whisper_key = None
+        self.whispercpp_model = None
+        self.whispercpp_key = None
+        self.coreml_runtime_ready = None
+        self.mps_segment_fallback_warned = False
         self.vad_model = None
         self.vad_device_info = None
         self.vision_processor = VisionProcessor(self._detect_best_device)
@@ -105,6 +117,10 @@ class HyperTranscriptionEngine:
 
     def _detect_best_device(self, user_choice="auto"):
         """[??? ???? ??] ??? ?? ?? ?? ?? ?? ??"""
+        if user_choice == "coreml":
+            if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                return "mps"
+            return "cpu"
         if user_choice.startswith("cpu"):
             return "cpu"
         if user_choice != "auto":
@@ -127,8 +143,38 @@ class HyperTranscriptionEngine:
             return "openai/whisper-large-v3-turbo"
         return None
 
+    def _get_whispercpp_model_name(self):
+        local_map = {
+            "large-v3-turbo": "large-v3-turbo",
+        }
+        if self.model_id in local_map:
+            return local_map[self.model_id]
+        return None
+
+    def _get_whispercpp_models_dir(self):
+        return os.path.join(self.base_dir, "models", "whispercpp-coreml")
+
+    def _get_whispercpp_model_path(self):
+        model_name = self._get_whispercpp_model_name()
+        if model_name is None:
+            return None
+        return os.path.join(self._get_whispercpp_models_dir(), f"ggml-{model_name}.bin")
+
     def _use_torch_whisper_backend(self, device_mode="auto"):
-        return self._detect_best_device(device_mode) == "mps" and self._get_torch_whisper_model_name() is not None
+        return backend_kind(device_mode) == "mps" and self._detect_best_device(device_mode) == "mps" and self._get_torch_whisper_model_name() is not None
+
+    def _use_coreml_backend(self, device_mode="auto"):
+        return backend_kind(device_mode) == "coreml"
+
+    def _detect_coreml_runtime(self):
+        if self.coreml_runtime_ready is not None:
+            return self.coreml_runtime_ready
+        if not HAS_PYWHISPERCPP:
+            self.coreml_runtime_ready = False
+            return self.coreml_runtime_ready
+        info = WhisperCppModel.system_info()
+        self.coreml_runtime_ready = "COREML = 1" in info
+        return self.coreml_runtime_ready
 
     def _get_torch_whisper_pipeline(self, device_mode="auto"):
         model_name = self._get_torch_whisper_model_name()
@@ -143,6 +189,7 @@ class HyperTranscriptionEngine:
                 "automatic-speech-recognition",
                 model=model_name,
                 device="mps",
+                dtype=torch.float32,
             )
             self.torch_whisper_key = cache_key
             print(f"[INFO] Using torch Whisper pipeline on MPS: {model_name}")
@@ -151,6 +198,8 @@ class HyperTranscriptionEngine:
     def get_model(self, device_mode="auto"):
         if self._use_torch_whisper_backend(device_mode):
             return self._get_torch_whisper_pipeline(device_mode)
+        if self._use_coreml_backend(device_mode):
+            return None
 
         target_threads = self._get_target_cores(device_mode)
         
@@ -174,19 +223,47 @@ class HyperTranscriptionEngine:
         pipe = self._get_torch_whisper_pipeline("mps")
         generate_kwargs = {
             "task": "transcribe",
+            "num_beams": 1,
         }
         if selected_lang:
             generate_kwargs["language"] = selected_lang
-
+        # transformers Whisper word timestamps are unstable on Korean in the current MPS path.
+        # Use segment timestamps for the mac Metal backend and let downstream code create
+        # coarse word blocks when needed, rather than crashing mid-analysis.
+        if use_word_timestamps and not self.mps_segment_fallback_warned:
+            print("[WARN] MPS backend is using segment timestamps fallback instead of word timestamps.")
+            self.mps_segment_fallback_warned = True
         result = pipe(
             np.asarray(audio_chunk, dtype=np.float32),
-            return_timestamps="word" if use_word_timestamps else True,
+            return_timestamps=True,
             generate_kwargs=generate_kwargs,
         )
+        use_word_timestamps = False
 
         text = (result.get("text") or "").strip()
         if not text:
             return []
+
+        if not use_word_timestamps:
+            chunk_segments = []
+            for chunk in result.get("chunks", []):
+                seg_text = (chunk.get("text") or "").strip()
+                timestamp = chunk.get("timestamp") or ()
+                if not seg_text or len(timestamp) != 2:
+                    continue
+                seg_start, seg_end = timestamp
+                if seg_start is None or seg_end is None or seg_end <= seg_start:
+                    continue
+                chunk_segments.append(
+                    RuntimeSegment(
+                        text=seg_text,
+                        start=float(seg_start),
+                        end=float(seg_end),
+                        words=[],
+                    )
+                )
+            if chunk_segments:
+                return chunk_segments
 
         if use_word_timestamps:
             words = []
@@ -206,6 +283,73 @@ class HyperTranscriptionEngine:
 
         duration = len(audio_chunk) / 16000.0
         return [RuntimeSegment(text=text, start=0.0, end=duration, words=[])]
+
+    def _get_whispercpp_model(self, device_mode="coreml"):
+        if not HAS_PYWHISPERCPP:
+            raise RuntimeError("pywhispercpp is not installed.")
+
+        model_name = self._get_whispercpp_model_name()
+        if model_name is None:
+            raise ValueError(f"whisper.cpp backend does not support model '{self.model_id}'.")
+
+        model_path = self._get_whispercpp_model_path()
+        coreml_bundle = os.path.join(
+            self._get_whispercpp_models_dir(),
+            f"ggml-{model_name}-encoder.mlmodelc",
+        )
+        if not os.path.isfile(model_path):
+            raise RuntimeError(
+                f"whisper.cpp model file is missing: {model_path}"
+            )
+        if not os.path.isdir(coreml_bundle):
+            raise RuntimeError(
+                f"whisper.cpp Core ML bundle is missing: {coreml_bundle}"
+            )
+
+        if not self._detect_coreml_runtime():
+            raise RuntimeError(
+                "whisper.cpp runtime is installed, but Core ML support is not enabled "
+                "(current system_info reports COREML = 0)."
+            )
+
+        threads = self._get_target_cores(device_mode)
+        cache_key = (model_path, threads, "coreml")
+        if self.whispercpp_model is None or self.whispercpp_key != cache_key:
+            self.whispercpp_model = WhisperCppModel(
+                model=model_path,
+                models_dir=self._get_whispercpp_models_dir(),
+                n_threads=threads,
+                print_realtime=False,
+                print_progress=False,
+                print_timestamps=False,
+            )
+            self.whispercpp_key = cache_key
+            print(f"[INFO] Using whisper.cpp Core ML backend: {model_path}")
+        return self.whispercpp_model
+
+    def _transcribe_with_coreml(self, audio_chunk, selected_lang, use_word_timestamps):
+        model = self._get_whispercpp_model("coreml")
+        params = {
+            "language": selected_lang or "auto",
+            "translate": False,
+            "token_timestamps": False,
+            "max_len": 0,
+        }
+        segments = model.transcribe(np.asarray(audio_chunk, dtype=np.float32), **params)
+        runtime_segments = []
+        for seg in segments:
+            text = (seg.text or "").strip()
+            if not text:
+                continue
+            runtime_segments.append(
+                RuntimeSegment(
+                    text=text,
+                    start=float(seg.t0) / 100.0,
+                    end=float(seg.t1) / 100.0,
+                    words=[],
+                )
+            )
+        return runtime_segments
 
     def set_model_id(self, new_model_id):
         if self.model_id != new_model_id:
@@ -377,14 +521,16 @@ class HyperTranscriptionEngine:
                         )
                             
                         try:
-                            if self._use_torch_whisper_backend(device_mode):
+                            if self._use_coreml_backend(device_mode):
+                                segs_list = self._transcribe_with_coreml(sub_chunk, selected_lang, use_word_timestamps)
+                            elif self._use_torch_whisper_backend(device_mode):
                                 segs_list = self._transcribe_with_torch_whisper(sub_chunk, selected_lang, use_word_timestamps)
                             else:
                                 segs, _ = model.transcribe(sub_chunk, **transcribe_kwargs)
                                 segs_list = list(segs)
                         except Exception as e:
                             err_text = str(e).lower()
-                            if (not self._use_torch_whisper_backend(device_mode)) and runtime_whisper_vad["enabled"] and any(token in err_text for token in ["onnx", "vad", "ort"]):
+                            if (not self._use_torch_whisper_backend(device_mode)) and (not self._use_coreml_backend(device_mode)) and runtime_whisper_vad["enabled"] and any(token in err_text for token in ["onnx", "vad", "ort"]):
                                 runtime_whisper_vad["enabled"] = False
                                 print(f"[WARN] Whisper VAD failed, retrying without internal VAD: {e}")
                                 transcribe_kwargs["vad_filter"] = False
@@ -608,7 +754,12 @@ class HyperTranscriptionEngine:
                         if TextSanitizer.is_looping_hallucination(clean_text):
                             # [시니어 재생성 알고리즘] 버리기 전에 해당 오디오 구간만 다시 추출하여 파라미터 변조 후 구출 시도
                             s_idx, e_idx = max(0, int((r_s - offset) * 16000)), min(len(chunk), int((r_e - offset) * 16000))
-                            if e_idx > s_idx:
+                            can_regenerate = (
+                                e_idx > s_idx
+                                and (not self._use_torch_whisper_backend(device_mode))
+                                and (not self._use_coreml_backend(device_mode))
+                            )
+                            if can_regenerate:
                                 regen_segs, _ = model.transcribe(
                                     chunk[s_idx:e_idx],
                                     beam_size=1,             # Beam Search 비활성화 (Greedy 방식 사용)
