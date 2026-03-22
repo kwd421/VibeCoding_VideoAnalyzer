@@ -1,4 +1,5 @@
 __pycache__/
+.DS_Store
 deprecated/
 *.wav
 *.srt
@@ -24,3 +25,6 @@ models/
 build/
 dist/
 *.spec
+
+# Local Python environments
+.venv/

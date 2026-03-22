@@ -1,26 +1,20 @@
 import os
 import sys
-import subprocess
-import wave
 import numpy as np
-import threading
 import torch
 import gc
-import glob
-import tempfile
-import shutil
-import noisereduce as nr
 import re
-from collections import Counter
-from PIL import Image
-from transformers import CLIPProcessor, CLIPModel
-from faster_whisper import WhisperModel
-from silero_vad import load_silero_vad, get_speech_timestamps
 import imageio_ffmpeg
 import concurrent.futures
 from app.models.config_models import AnalysisSettings, TranscriptSegment, TranscriptWord
 from app.processors.text_sanitizer import TextSanitizer
 from app.processors.audio_processor import AudioProcessor
+from app.processors.audio_chunking import AudioChunkingService
+from app.processors.transcription_router import TranscriptionRouter
+from app.processors.vad_service import VADService
+from app.processors.backends.faster_whisper_backend import FasterWhisperBackend
+from app.processors.backends.transformers_mps_backend import TransformersMpsBackend
+from app.processors.backends.whispercpp_coreml_backend import WhisperCppCoreMLBackend
 from app.services.vision_processor import VisionProcessor
 # [시니어] WhisperX 정밀 정렬 (Optional Dependency)
 try:
@@ -43,6 +37,18 @@ class HyperTranscriptionEngine:
         self.vad_model = None
         self.vision_processor = VisionProcessor(self._detect_best_device)
         self.clip_processor = None
+        self.audio_chunking = AudioChunkingService()
+        self.faster_whisper_backend = FasterWhisperBackend(
+            self._resolve_model_id,
+            self._detect_best_device,
+            self._get_target_cores,
+        )
+        self.vad_service = VADService(self._detect_best_device, self._get_target_cores)
+        self.transcription_router = TranscriptionRouter(
+            self.faster_whisper_backend,
+            TransformersMpsBackend(),
+            WhisperCppCoreMLBackend(),
+        )
         
         # [시니어 최적화] 하드웨어 코어의 50%만 동적으로 계산하여 할당 (100% 점유 방지)
         total_cores = os.cpu_count() or 4
@@ -104,22 +110,9 @@ class HyperTranscriptionEngine:
         return max(1, int(total_cores * 0.50)) # 기본값 50%
 
     def get_model(self, device_mode="auto"):
-        target_threads = self._get_target_cores(device_mode)
-        
-        # 모델 리로드 조건: 디바이스가 바뀌었거나, CPU 모드인데 쓰레드 설정이 달라진 경우
-        if self.fw_model is None or self.device_info != device_mode:
-            self.device_info = device_mode
-            best_device = self._detect_best_device(device_mode)
-            # CTranslate2의 디바이스 맵핑 (cuda/cpu 외에는 fall back)
-            ct2_dev = "cuda" if best_device == "cuda" else "cpu"
-            c_type = "float16" if ct2_dev == "cuda" else "int8"
-            
-            # [시니어 최적화] Multi-worker 환경에서 Thread 뻥튀기를 방지하기 위해 Total Thread 제한
-            workers = 2 if ct2_dev == "cpu" else 1
-            threads_per_worker = max(1, target_threads // workers)
-            
-            model_source = self._resolve_model_id(self.model_id)
-            self.fw_model = WhisperModel(model_source, device=ct2_dev, compute_type=c_type, cpu_threads=threads_per_worker, num_workers=workers)
+        backend = self.transcription_router.resolve_backend(device_mode)
+        self.fw_model = backend.get_model(self.model_id, device_mode)
+        self.device_info = device_mode
         return self.fw_model
 
     def set_model_id(self, new_model_id):
@@ -128,20 +121,7 @@ class HyperTranscriptionEngine:
             self.fw_model = None  # Force reload model
 
     def get_vad_model(self, device_mode="auto"):
-        if self.vad_model is None:
-            target_threads = self._get_target_cores(device_mode)
-            torch.set_num_threads(target_threads)
-            # Silero VAD 로드 패치 (Warning 방지)
-            import warnings
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=UserWarning)
-                self.vad_model = load_silero_vad()
-            
-            # 모델을 하드웨어 장치에 탑재
-            best_dev = self._detect_best_device(device_mode)
-            if best_dev != "cpu":
-                self.vad_model = self.vad_model.to(best_dev)
-                
+        self.vad_model = self.vad_service.get_model(device_mode)
         return self.vad_model
 
     def get_clip_model(self, device_mode="auto"):
@@ -172,26 +152,13 @@ class HyperTranscriptionEngine:
         return AudioProcessor.load_audio_to_memory(video_path, self.ffmpeg_exe)
 
     def detect_speech_vad_stream(self, audio_data, stop_event, min_silence_ms=2000, speech_pad_ms=250, options=None):
-        options = options or {}
-        device_mode = options.get("device_mode", "auto")
-        vad_threshold = options.get("vad_threshold", 0.35)
-        model = self.get_vad_model(device_mode)
-        sample_rate, chunk_size, overlap = 16000, 16000 * 60, 16000 * 2
-        total_samples = len(audio_data)
-        last_end_time = 0.0
-        for i in range(0, total_samples, chunk_size):
-            if stop_event.is_set(): break
-            start, end = i, min(i + chunk_size + overlap, total_samples)
-            tss = get_speech_timestamps(torch.from_numpy(audio_data[start:end]), model, sampling_rate=sample_rate, threshold=vad_threshold, min_speech_duration_ms=150, min_silence_duration_ms=min_silence_ms, speech_pad_ms=speech_pad_ms)
-            offset, chunk_results = start / sample_rate, []
-            for ts in tss:
-                s_t, e_t = offset + ts['start']/sample_rate, offset + ts['end']/sample_rate
-                if e_t <= last_end_time: continue # 완전히 이전 대사에 파묻힌 역전 현상 무시
-                s_t = max(s_t, last_end_time) # 겹치는 시작점 보정
-                if s_t >= e_t: continue
-                chunk_results.append({'s': s_t, 'e': e_t, 't': f"{e_t - s_t:.2f}s"})
-                last_end_time = max(last_end_time, e_t)
-            yield chunk_results, (min(start + chunk_size, total_samples) / total_samples) * 100
+        yield from self.vad_service.detect_speech_stream(
+            audio_data,
+            stop_event,
+            min_silence_ms=min_silence_ms,
+            speech_pad_ms=speech_pad_ms,
+            options=options,
+        )
 
     def detect_peaks_stream(self, audio, stop_event):
         return AudioProcessor.detect_peaks_stream(audio, stop_event)
@@ -230,26 +197,27 @@ class HyperTranscriptionEngine:
             audio_data = self.denoise_audio(audio_data)
 
         total_samples = len(audio_data)
-        # [CRITICAL] Stop 버튼 응답성을 1초 이내로 확보하기 위해 Whisper 청크 단위를 30초로 단축
-        total_dur, chunk_size, search_samples = total_samples / 16000, 16000 * 30, 16000 * 5
+        total_dur = total_samples / 16000.0
         
         def safe_generator():
-            start_idx = 0
-            while start_idx < total_samples:
-                if stop_event.is_set(): break
-                base_end = start_idx + chunk_size
-                if base_end >= total_samples: end_idx = total_samples
-                else:
-                    search_chunk = audio_data[max(start_idx, base_end - search_samples):base_end]
-                    end_idx = max(start_idx, base_end - search_samples) + (np.argmin(np.sum(search_chunk[:(len(search_chunk)//1600)*1600].reshape(-1, 1600)**2, axis=1)) * 1600) if len(search_chunk) >= 1600 else base_end
-                
-                chunk, offset = audio_data[start_idx:end_idx], start_idx / 16000
+            for chunk, offset, start_idx, end_idx, _chunk_total_dur in self.audio_chunking.iter_transcription_chunks(
+                audio_data,
+                stop_event,
+            ):
+                if stop_event.is_set():
+                    break
                 if len(chunk) > 16000:
                     # [시니어 최적화] VAD-Whisper 2-Tier Architecture 도입 여부
                     safe_tss = []
                     if use_silero_vad:
-                        vad_model = self.get_vad_model(device_mode)
-                        tss = get_speech_timestamps(torch.from_numpy(chunk), vad_model, sampling_rate=16000, threshold=vad_threshold, min_speech_duration_ms=150, min_silence_duration_ms=min_silence_ms, speech_pad_ms=speech_pad_ms)
+                        tss = self.vad_service.get_speech_timestamps(
+                            chunk,
+                            device_mode=device_mode,
+                            vad_threshold=vad_threshold,
+                            min_silence_ms=min_silence_ms,
+                            speech_pad_ms=speech_pad_ms,
+                            sampling_rate=16000,
+                        )
                         
                         last_end_time = 0.0
                         for ts in tss:
@@ -543,7 +511,6 @@ class HyperTranscriptionEngine:
                         yield r
                 
                 gc.collect()
-                start_idx = end_idx
                 # --- [추가] 물리적 오디오 처리 위치 기반 진행률 강제 보고 ---
                 yield {"is_heartbeat": True, "progress": (start_idx / total_samples) * 100}
         

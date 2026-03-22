@@ -232,7 +232,7 @@ class CustomModelApp:
         self._report_startup_progress(50, "Building interface...")
         self.setup_ui()
         self._report_startup_progress(75, "Connecting player...")
-        self.player = VideoPlayer(self.video_canvas.winfo_id())
+        self.player = VideoPlayer(self.video_canvas)
         self.bind_keys()
         self.bind_events()
         self.root.after(16, self._drain_ui_queue)
@@ -2627,6 +2627,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     def update_loop(self):
         if self.player:
+            if hasattr(self.player, 'sync_video_container'):
+                self.player.sync_video_container()
             if not self.is_seeking:
                 pos = self.player.get_position()
                 if pos >= 0: self.seek_var.set(pos * 1000)
@@ -2720,7 +2722,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     for i, r in enumerate(self.results_data):
                         writer.writerow([i+1, r['s'], r['e'], r['t']])
             messagebox.showinfo('?꾨즺', '??λ릺?덉뒿?덈떎.')
-
 
 
 
