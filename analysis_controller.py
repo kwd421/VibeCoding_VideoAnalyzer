@@ -97,6 +97,14 @@ class AnalysisController:
             if stop_ev.is_set(): 
                 self.dispatcher.emit("ghost_defense", {})
 
+    def wait_for_stop(self, stop_event, worker_thread, timeout=10.0):
+        """Signal stop and wait briefly for the active analysis thread to unwind."""
+        if stop_event is not None:
+            stop_event.set()
+        if worker_thread and worker_thread.is_alive() and worker_thread is not threading.current_thread():
+            worker_thread.join(timeout=timeout)
+        return worker_thread is None or (not worker_thread.is_alive())
+
     def run_editing(self, current_video_path, out_path, results_data, stop_event, settings, burn_ass=None):
         def upd_p(v, eta): self.dispatcher.emit("progress", {"value": v, "text": f"렌더링 중 ({v}%){f' - 남은 시간: {int(eta//60)}분 {int(eta%60)}초' if eta >= 0 else ''}"})
         try:

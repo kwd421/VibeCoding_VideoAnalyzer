@@ -17,6 +17,15 @@ from analysis_controller import AnalysisController
 from ui_block_editor import UIBlockEditor
 from transcription_backends import BACKEND_LABELS, mode_from_label
 
+AI_MODEL_OPTIONS = (
+    ("large-v3-turbo (기본)", "large-v3-turbo"),
+    ("medium (속도)", "medium"),
+    ("models/Whisper-Large-v3-turbo-STT-Zeroth-KO-v2 (Local Zeroth)", "models/Whisper-Large-v3-turbo-STT-Zeroth-KO-v2"),
+    ("models/whisper-medium-ko-zeroth (Medium-Zeroth)", "models/whisper-medium-ko-zeroth"),
+)
+AI_MODEL_LABELS = [label for label, _ in AI_MODEL_OPTIONS]
+AI_MODEL_ID_BY_LABEL = {label: model_id for label, model_id in AI_MODEL_OPTIONS}
+
 class LblMarquee(tk.Canvas):
     def __init__(self, parent, text="", font=('Noto Sans KR', 11), fg='#34C759', bg='#FFFFFF', height=30):
         super().__init__(parent, bg=bg, height=height, highlightthickness=0, bd=0)
@@ -167,6 +176,7 @@ class CustomModelApp:
         self.video_editor = VideoEditor()
         self.player = None
         self.stop_event = threading.Event()
+        self.analysis_thread = None
         self._is_closing = False
         self.transcript_manager = TranscriptManager()
         self.current_video_path = None
@@ -213,6 +223,9 @@ class CustomModelApp:
 
             if self.player:
                 self.player.stop()
+            if self.analysis_thread and self.analysis_thread.is_alive():
+                self.analysis_thread.join(timeout=3.0)
+            self.engine.release_runtime_memory()
         except Exception:
             pass
         finally:
@@ -247,8 +260,8 @@ class CustomModelApp:
         self.dispatcher.on("add_row", lambda x: self._queue_ui(lambda: self._on_add_row(x)))
         self.dispatcher.on("complete", lambda x: self._queue_ui(lambda: self._on_complete(x)))
         self.dispatcher.on("message", lambda x: self._queue_ui(lambda: messagebox.showinfo("Done", x["text"])))
-        self.dispatcher.on("error", lambda x: self._queue_ui(lambda: messagebox.showerror("Error", x["text"])))
-        self.dispatcher.on("ghost_defense", lambda x: self._queue_ui(lambda: [self.reset_action_button(), self.btn_stop.config(state=tk.DISABLED)]))
+        self.dispatcher.on("error", lambda x: self._queue_ui(lambda: self._on_error(x)))
+        self.dispatcher.on("ghost_defense", lambda x: self._queue_ui(lambda: self._on_ghost_defense()))
 
     def _on_progress(self, task):
         self.progress_var.set(task["value"]); self.lbl_status.config(text=task["text"])
@@ -264,6 +277,7 @@ class CustomModelApp:
         self._add_row_debounce = self.root.after(500, lambda: self.apply_preview_subtitles(force_reload=False))
         
     def _on_complete(self, task):
+        self.analysis_thread = None
         self.lbl_status.config(text=task["text"], fg=self.C['green']); self.progress_var.set(100)
         self.btn_analyze.config(state=tk.NORMAL)
         if task.get("is_vad"): 
@@ -271,6 +285,16 @@ class CustomModelApp:
             for b in [self.btn_fast_save, self.btn_pro_save]: b.config(state=tk.NORMAL)
         
         if task.get("is_whisper"): self.apply_preview_subtitles()
+        self.btn_stop.config(state=tk.DISABLED)
+
+    def _on_error(self, task):
+        self.analysis_thread = None
+        self.btn_stop.config(state=tk.DISABLED)
+        messagebox.showerror("Error", task["text"])
+
+    def _on_ghost_defense(self):
+        self.analysis_thread = None
+        self.reset_action_button()
         self.btn_stop.config(state=tk.DISABLED)
 
     def setup_ui(self):
@@ -421,7 +445,7 @@ class CustomModelApp:
         bf = tk.Button(c1, text='  📂  영상 파일 선택  ', command=self.on_select_video, bg=C['bg3'], fg=C['text'], font=_f, relief='flat', bd=0, compound='center', pady=8, cursor='hand2'); bf.pack(fill=tk.X, pady=(0,6)); _hover(bf, C['bg3'], C['border'])
         r = _row(c1); tk.Label(r, text='AI 모델', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
         self.ai_model_var = tk.StringVar(value='large-v3-turbo (기본)')
-        self.ai_model_combo = ttk.Combobox(r, textvariable=self.ai_model_var, values=['large-v3-turbo (기본)', 'models/Whisper-Large-v3-turbo-STT-Zeroth-KO-v2 (Local Zeroth)', 'models/whisper-medium-ko-zeroth (Medium-Zeroth)'], state='readonly', width=36); self.ai_model_combo.pack(side=tk.RIGHT)
+        self.ai_model_combo = ttk.Combobox(r, textvariable=self.ai_model_var, values=AI_MODEL_LABELS, state='readonly', width=36); self.ai_model_combo.pack(side=tk.RIGHT)
         self.ai_model_var.trace_add('write', lambda *_: self.reset_action_button())
         _sep(c1)
         r = _row(c1); tk.Label(r, text='가속 장치', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
@@ -773,10 +797,17 @@ class CustomModelApp:
     def load_engine_async(self): threading.Thread(target=self.controller.init_engine, daemon=True).start()
 
     def reset_action_button(self): self.save_frame.pack_forget(); self.btn_analyze.config(text="  분석 시작  ", command=self.on_start_analysis, bg=self.C['accent'], state=tk.NORMAL); self.btn_fast_save.config(state=tk.NORMAL); self.btn_pro_save.config(state=tk.NORMAL)
+    def _stop_active_analysis(self, timeout=10.0):
+        active_thread = self.analysis_thread
+        stopped = self.controller.wait_for_stop(self.stop_event, active_thread, timeout=timeout)
+        if stopped:
+            self.analysis_thread = None
+        self.stop_event = threading.Event()
+        return stopped
+
     def reset_for_new_video(self):
         """Clear previous analysis state when selecting a new video."""
-        self.stop_event.set()
-        self.stop_event = threading.Event()
+        self._stop_active_analysis(timeout=10.0)
         self.results_data = []
         self.tree.delete(*self.tree.get_children())
         self.progress_var.set(0)
@@ -784,6 +815,7 @@ class CustomModelApp:
         self.lbl_time.config(text='00:00 / 00:00')
         self.btn_stop.config(state=tk.DISABLED)
         self._last_active_idx = -2
+        self.engine.release_runtime_memory()
         if hasattr(self, 'block_editor'):
             self.block_editor.render_block_view()
 
@@ -843,8 +875,11 @@ class CustomModelApp:
             self.root.after(1500, lambda: self.reset_action_button() or self.lbl_status.config(text="작업 중지됨", fg=self.C['red']))
 
     def on_start_analysis(self):
+        if self.analysis_thread and self.analysis_thread.is_alive():
+            messagebox.showwarning("작업 중", "이전 분석이 아직 종료 중입니다. 잠시 후 다시 시도해 주세요.")
+            return
         mode = self.mode_var.get()
-        selected_model = self.ai_model_var.get().split(" ")[0]
+        selected_model = AI_MODEL_ID_BY_LABEL.get(self.ai_model_var.get(), "large-v3-turbo")
         self.engine.set_model_id(selected_model)
         
         # [시니어 추가] 분석 옵션 수집
@@ -875,7 +910,8 @@ class CustomModelApp:
         
         # 컨트롤러에 작업 이관
         max_chars = self.max_len_int.get()
-        threading.Thread(target=self.controller.run_analysis, args=(self.current_video_path, self.stop_event, mode, min_sil_ms, pad_ms, max_chars, analysis_options), daemon=True).start()
+        self.analysis_thread = threading.Thread(target=self.controller.run_analysis, args=(self.current_video_path, self.stop_event, mode, min_sil_ms, pad_ms, max_chars, analysis_options), daemon=True)
+        self.analysis_thread.start()
 
     def start_export(self, fast=True):
         media_info = self.video_editor.get_media_info(self.current_video_path); ext = os.path.splitext(self.current_video_path)[1].lower().strip('.')

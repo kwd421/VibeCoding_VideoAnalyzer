@@ -58,6 +58,21 @@ class RuntimeSegment:
     end: float
     words: list
 
+
+MODEL_SPECS = {
+    "large-v3-turbo": {
+        "bundled_fw_dir": "faster-whisper-large-v3-turbo",
+        "torch_model": "openai/whisper-large-v3-turbo",
+        "whispercpp_model": "large-v3-turbo",
+    },
+    "medium": {
+        "bundled_fw_dir": "faster-whisper-medium",
+        "torch_local_dir": "transformers-whisper-medium",
+        "torch_model": "openai/whisper-medium",
+        "whispercpp_model": "medium-q5_0",
+    },
+}
+
 class HyperTranscriptionEngine:
     def __init__(self):
         self.base_dir = self._get_base_dir()
@@ -80,6 +95,35 @@ class HyperTranscriptionEngine:
         self.cpu_cores = max(1, int(total_cores * 0.5))
         self.device_info = "auto"
         self.align_models_cache = {}    # [캐싱] (언어, 디바이스)별 WhisperX 정렬 모델
+
+    def release_runtime_memory(self):
+        """Release backend/model objects so long-running sessions do not accumulate memory across analyses."""
+        try:
+            self.fw_model = None
+            self.torch_whisper_pipe = None
+            self.torch_whisper_key = None
+            self.whispercpp_model = None
+            self.whispercpp_key = None
+            self.vad_model = None
+            self.vad_device_info = None
+            self.align_models_cache.clear()
+            self.mps_segment_fallback_warned = False
+
+            if hasattr(self.vision_processor, "clip_model"):
+                self.vision_processor.clip_model = None
+            if hasattr(self.vision_processor, "clip_processor"):
+                self.vision_processor.clip_processor = None
+            if hasattr(self.vision_processor, "clip_model_key"):
+                self.vision_processor.clip_model_key = None
+
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                torch.mps.empty_cache()
+        except Exception as e:
+            print(f"[WARN] release_runtime_memory failed: {e}")
         
     def _get_base_dir(self):
         if getattr(sys, "frozen", False):
@@ -100,13 +144,15 @@ class HyperTranscriptionEngine:
         else:
             candidate_paths.append(normalized)
 
-        if model_id == "large-v3-turbo":
+        spec = MODEL_SPECS.get(model_id)
+        bundled_fw_dir = spec.get("bundled_fw_dir") if spec else None
+        if bundled_fw_dir:
             for root_dir in (self.base_dir, getattr(sys, "_MEIPASS", None)):
                 if not root_dir:
                     continue
-                bundled_path = os.path.join(root_dir, "models", "faster-whisper-large-v3-turbo")
+                bundled_path = os.path.join(root_dir, "models", bundled_fw_dir)
                 if os.path.isdir(bundled_path):
-                    print(f"[INFO] Using bundled large-v3-turbo model: {bundled_path}")
+                    print(f"[INFO] Using bundled {model_id} model: {bundled_path}")
                     return bundled_path
 
         for candidate in candidate_paths:
@@ -139,17 +185,20 @@ class HyperTranscriptionEngine:
         return max(1, int(total_cores * 0.50)) # 기본값 50%
 
     def _get_torch_whisper_model_name(self):
-        if self.model_id == "large-v3-turbo":
-            return "openai/whisper-large-v3-turbo"
-        return None
+        spec = MODEL_SPECS.get(self.model_id, {})
+        local_dir = spec.get("torch_local_dir")
+        if local_dir:
+            for root_dir in (self.base_dir, getattr(sys, "_MEIPASS", None)):
+                if not root_dir:
+                    continue
+                local_path = os.path.join(root_dir, "models", local_dir)
+                if os.path.isdir(local_path):
+                    return local_path
+        return spec.get("torch_model")
 
     def _get_whispercpp_model_name(self):
-        local_map = {
-            "large-v3-turbo": "large-v3-turbo",
-        }
-        if self.model_id in local_map:
-            return local_map[self.model_id]
-        return None
+        spec = MODEL_SPECS.get(self.model_id, {})
+        return spec.get("whispercpp_model")
 
     def _get_whispercpp_models_dir(self):
         return os.path.join(self.base_dir, "models", "whispercpp-coreml")
@@ -165,6 +214,14 @@ class HyperTranscriptionEngine:
 
     def _use_coreml_backend(self, device_mode="auto"):
         return backend_kind(device_mode) == "coreml"
+
+    def _fallback_medium_device_mode(self, requested_mode, reason):
+        backend = backend_kind(requested_mode)
+        if self.model_id != "medium" or backend not in {"mps", "coreml"}:
+            return requested_mode, False
+        fallback_mode = "cpu_50"
+        print(f"[WARN] Falling back to {fallback_mode} for medium model from {requested_mode}: {reason}")
+        return fallback_mode, True
 
     def _detect_coreml_runtime(self):
         if self.coreml_runtime_ready is not None:
@@ -354,6 +411,7 @@ class HyperTranscriptionEngine:
     def set_model_id(self, new_model_id):
         if self.model_id != new_model_id:
             self.model_id = new_model_id
+            self.release_runtime_memory()
             self.fw_model = None  # Force reload model
 
     def get_vad_model(self, device_mode="auto"):
@@ -440,7 +498,17 @@ class HyperTranscriptionEngine:
     def transcribe_stream_raw(self, audio_data, stop_event, options: AnalysisSettings = None):
         if options is None: options = AnalysisSettings()
         device_mode = options.device_mode
-        model = self.get_model(device_mode)
+        device_mode, _ = self._fallback_medium_device_mode(
+            device_mode,
+            "medium backend is currently stabilized on the CPU path in this build",
+        )
+        try:
+            model = self.get_model(device_mode)
+        except Exception as e:
+            device_mode, did_fallback = self._fallback_medium_device_mode(device_mode, e)
+            if not did_fallback:
+                raise
+            model = self.get_model(device_mode)
         
         beam_size = options.beam_size
         use_denoise = options.use_denoise
@@ -731,7 +799,7 @@ class HyperTranscriptionEngine:
                             if stop_event.is_set(): break
                             raw_results.extend(fut.result())
                     finally:
-                        executor.shutdown(wait=False)
+                        executor.shutdown(wait=True)
                     
                     # [시니어 추가] 주인공 목소리 필터링 적용
                     if use_dominant and len(raw_results) > 0:
