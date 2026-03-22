@@ -21,12 +21,17 @@ from app.utils.event_dispatcher import EventEmitter
 from analysis_controller import AnalysisController
 from ui_block_editor import UIBlockEditor
 from app.models.overlay_manager import OverlayManager
+from app.services.analysis_session import AnalysisSession
+from app.services.runtime_memory import RuntimeMemoryService
 from app.adapters.subtitle_overlay_adapter import build_subtitle_overlays
 from app.ui.overlay_actions import delete_selected_overlay as overlay_delete_selected_overlay, reorder_selected_overlay as overlay_reorder_selected_overlay
 from app.ui.overlay_render import build_overlay_preview_image as overlay_build_overlay_preview_image, rotate_overlay_point as overlay_rotate_overlay_point, get_image_overlay_geometry as overlay_get_image_overlay_geometry
 from app.ui.overlay_selection import clear_overlay_selection_visuals as overlay_clear_selection_visuals, set_selected_overlay as overlay_set_selected_overlay, clear_selected_overlay as overlay_clear_selected_overlay
 from app.ui.overlay_timeline import refresh_overlay_timeline as overlay_refresh_overlay_timeline, update_overlay_timeline_playhead as overlay_update_overlay_timeline_playhead, on_overlay_timeline_press as overlay_on_overlay_timeline_press, on_overlay_timeline_drag as overlay_on_overlay_timeline_drag, on_overlay_timeline_release as overlay_on_overlay_timeline_release
 from app.ui.input_bindings import bind_keys as ui_bind_keys
+from app.ui.analysis_actions import load_engine_async as ui_load_engine_async, start_analysis as ui_start_analysis, stop_action as ui_stop_action
+from app.ui.session_ui_state import handle_progress as ui_handle_progress, handle_complete as ui_handle_complete, reset_action_button as ui_reset_action_button
+from app.ui.video_panel import toggle_play as ui_toggle_play, skip_time as ui_skip_time, on_seek_start as ui_on_seek_start, on_seek_motion as ui_on_seek_motion, on_seek_release as ui_on_seek_release
 from app.ui.overlay_props import refresh_overlay_property_panel as overlay_refresh_property_panel, apply_selected_overlay_properties as overlay_apply_selected_overlay_properties, on_toggle_selected_overlay_visible as overlay_on_toggle_selected_overlay_visible, is_overlay_props_widget as overlay_is_overlay_props_widget, on_overlay_props_mousewheel as overlay_on_overlay_props_mousewheel
 from app.ui.ui_setup_static import build_timeline_notebook as ui_build_timeline_notebook, build_tree_tab_static as ui_build_tree_tab_static, build_overlay_tab_static as ui_build_overlay_tab_static
 from app.ui.ui_setup_inspector import build_inspector_shell as ui_build_inspector_shell, make_inspector_button as ui_make_inspector_button, make_inspector_card as ui_make_inspector_card, make_inspector_row as ui_make_inspector_row, make_inspector_sep as ui_make_inspector_sep, build_style_tab_shell as ui_build_style_tab_shell, make_style_row as ui_make_style_row
@@ -183,6 +188,8 @@ class CustomModelApp:
         self.video_editor = VideoEditor()
         self.player = None
         self.stop_event = threading.Event()
+        self.analysis_session = AnalysisSession()
+        self.runtime_memory = RuntimeMemoryService()
         self._is_closing = False
         self.transcript_manager = TranscriptManager()
         self.current_video_path = None
@@ -247,10 +254,22 @@ class CustomModelApp:
     def on_closing(self):
         """Clean up temp files and stop background work before exit."""
         self._is_closing = True
+        self.analysis_session.request_stop()
         self.stop_event.set()
         try:
             import glob
             import shutil
+            self.runtime_memory.cancel_jobs(
+                self.root,
+                self,
+                [
+                    "_add_row_debounce",
+                    "_sub_debounce",
+                    "_overlay_resize_refresh_job",
+                    "_overlay_prop_refresh_job",
+                    "_edit_debounce_timer",
+                ],
+            )
             # 1. Remove temporary ASS subtitle files.
             for f in glob.glob(os.path.join(self.base_dir, "export_burn_*.ass")):
                 try:
@@ -268,6 +287,8 @@ class CustomModelApp:
             if self.player:
                 self.player.stop()
             self._stop_audio_clip_playback()
+            self.analysis_session.request_stop_and_join(timeout=2.0)
+            self.runtime_memory.release_analysis_references()
         except Exception:
             pass
         finally:
@@ -317,7 +338,7 @@ class CustomModelApp:
         self.dispatcher.on("ghost_defense", lambda x: self._queue_ui(lambda: [self.reset_action_button(), self.btn_stop.configure(state=tk.DISABLED)]))
 
     def _on_progress(self, task):
-        self.progress_var.set(task["value"]); self.lbl_status.config(text=task["text"])
+        return ui_handle_progress(self, task)
         
     def _on_add_row(self, task):
         self.tree.insert("", "end", values=(task["i"], self.format_time(task['s']), self.format_time(task['e']), task['t']))
@@ -330,18 +351,7 @@ class CustomModelApp:
         self._add_row_debounce = self.root.after(500, lambda: self.apply_preview_subtitles(force_reload=False))
         
     def _on_complete(self, task):
-        self.lbl_status.config(text=task["text"], fg=self.C['green'])
-        self.progress_var.set(100)
-        self.btn_analyze.configure(state=tk.NORMAL)
-        has_results = bool(self.results_data)
-        if task.get("is_vad") or task.get("is_whisper") or has_results:
-            self.save_frame.pack(fill=tk.X, pady=5, before=self.lbl_status)
-            for b in [self.btn_fast_save, self.btn_pro_save]:
-                b.configure(state=tk.NORMAL)
-
-        if task.get("is_whisper"):
-            self.apply_preview_subtitles()
-        self.btn_stop.configure(state=tk.DISABLED)
+        return ui_handle_complete(self, task)
 
     def setup_ui(self):
         C = self.C
@@ -814,18 +824,21 @@ class CustomModelApp:
                 return int(parts[0]) * 60 + float(parts[1])
         return float(str(t_str).replace("s", ""))
 
-    def load_engine_async(self): threading.Thread(target=self.controller.init_engine, daemon=True).start()
+    def load_engine_async(self):
+        return ui_load_engine_async(self)
 
     def reset_action_button(self):
-        self.save_frame.pack_forget()
-        self.btn_analyze.configure(text='분석 시작', command=self.on_start_analysis, state=tk.NORMAL)
-        self.btn_fast_save.configure(state=tk.NORMAL)
-        self.btn_pro_save.configure(state=tk.NORMAL)
+        return ui_reset_action_button(self)
 
     def reset_for_new_video(self):
         """Clear previous analysis state when selecting a new video."""
-        self.stop_event.set()
-        self.stop_event = threading.Event()
+        self.analysis_session.request_stop_and_join(timeout=1.0)
+        self.stop_event = self.analysis_session.reset_stop_event()
+        self.runtime_memory.cancel_jobs(
+            self.root,
+            self,
+            ["_add_row_debounce", "_sub_debounce"],
+        )
         self._stop_audio_clip_playback()
         self.results_data = []
         self.tree.delete(*self.tree.get_children())
@@ -2142,53 +2155,11 @@ class CustomModelApp:
 
 
     def on_stop_action(self):
-        if self.stop_event and not self.stop_event.is_set():
-            self.stop_event.set()
-        self.lbl_status.config(text='진행 중인 작업을 중지하는 중...', fg=self.C['red'])
-        self.btn_stop.configure(state=tk.DISABLED)
-        self.root.after(1500, lambda: self.reset_action_button() or self.lbl_status.config(text='작업이 중지되었습니다.', fg=self.C['red']))
+        return ui_stop_action(self)
 
 
     def on_start_analysis(self):
-        mode = self.mode_var.get()
-        selected_model = self.ai_model_var.get().split(" ")[0]
-        self.engine.set_model_id(selected_model)
-        
-        # [??뺣빍???곕떽?] ?브쑴苑???????륁춿
-        try: min_sil_ms, pad_ms = int(self.silence_dur_var.get() * 1000), int(self.speech_pad_var.get() * 1000)
-        except: min_sil_ms, pad_ms = 2000, 250
-        
-        device_val = self.device_var.get()
-        if "auto" in device_val: mapped_dev = "auto"
-        elif "cuda" in device_val: mapped_dev = "cuda"
-        elif "mps" in device_val: mapped_dev = "mps"
-        elif "25%" in device_val: mapped_dev = "cpu_25"
-        elif "50%" in device_val: mapped_dev = "cpu_50"
-        elif "75%" in device_val: mapped_dev = "cpu_75"
-        else: mapped_dev = "cpu"
-
-        analysis_options = AnalysisSettings(
-            beam_size=self.beam_size_var.get(),
-            use_denoise=self.use_denoise_var.get(),
-            use_dominant=self.use_dominant_var.get(),
-            language=self.lang_var.get().split("(")[-1].replace(")", "").strip(),
-            vad_threshold=self.vad_threshold_var.get(),
-            min_silence_ms=min_sil_ms,
-            speech_pad_ms=pad_ms,
-            use_word_timestamps=True,
-            use_whisper_vad=self.use_whisper_vad_var.get(),
-            use_silero_vad=self.use_silero_vad_var.get(),
-            use_whisperx_align=getattr(self, 'use_whisperx_var', tk.BooleanVar(value=False)).get(),
-            remove_punctuation=getattr(self, 'remove_punctuation_var', tk.BooleanVar(value=False)).get(),
-            device_mode=mapped_dev
-        )
-        
-        self.stop_event = threading.Event(); self.btn_analyze.configure(state=tk.DISABLED); self.btn_stop.configure(state=tk.NORMAL); self.progress_var.set(0); self.results_data = []
-        for i in self.tree.get_children(): self.tree.delete(i)
-        
-        # ?뚢뫂?껅에?살쑎???臾믩씜 ???
-        max_chars = self.max_len_int.get()
-        threading.Thread(target=self.controller.run_analysis, args=(self.current_video_path, self.stop_event, mode, min_sil_ms, pad_ms, max_chars, analysis_options), daemon=True).start()
+        return ui_start_analysis(self)
 
     def _collect_overlays_for_export(self):
         overlays = []
@@ -2323,7 +2294,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             
             overlays = self._collect_overlays_for_export()
             settings = {'v_codec': media_info.get('v_codec', 'h264'), 'a_codec': media_info.get('a_codec', 'aac'), 'v_bitrate': f"{media_info.get('v_bitrate', 5000000) // 1000}k", 'a_bitrate': f"{media_info.get('a_bitrate', 128000) // 1000}k", 'fast_mode': fast, 'overlays': overlays}
-            threading.Thread(target=self.controller.run_editing, args=(self.current_video_path, save_path, self.results_data, self.stop_event, settings, ass_path_final), daemon=True).start()
+            self.stop_event = self.analysis_session.reset_stop_event()
+            self.analysis_session.start(
+                self.controller.run_editing,
+                args=(self.current_video_path, save_path, self.results_data, self.stop_event, settings, ass_path_final),
+                daemon=True,
+                name="editing-worker",
+            )
 
     def on_export_xml(self):
         save_path = filedialog.asksaveasfilename(defaultextension=".xml", filetypes=[("Final Cut Pro XML", "*.xml")], initialfile=f"Timeline_{os.path.splitext(os.path.basename(self.current_video_path))[0]}.xml")
@@ -2587,34 +2564,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             import traceback; traceback.print_exc()
             print(f'[ERROR] apply_preview_subtitles ??쎈솭: {e}')
     def toggle_play(self):
-        if self.player:
-            is_p = self.player.toggle_play()
-            self.btn_play.config(text='일시정지' if is_p else '재생')
-            self._sync_audio_clip_playback(force_seek=True)
+        return ui_toggle_play(self)
     def skip_time(self, ms): 
-        if self.player: self.player.skip(ms)
+        return ui_skip_time(self, ms)
     def on_seek_start(self, e):
-        self.is_seeking = True
-        self._was_playing_before_seek = self.player.is_playing() if self.player else False
-        self._sync_audio_clip_playback(force_seek=True)
-        if self.player:
-            self.player.set_mute(True)
-            if not self._was_playing_before_seek:
-                self.player.toggle_play() # 揶쏅벡??揶쏄퉮????袁る퉸 ??源???뽰삂
-        self._update_seek_from_mouse(e)
+        return ui_on_seek_start(self, e)
     def on_seek_motion(self, e):
-        if self.is_seeking: self._update_seek_from_mouse(e)
+        return ui_on_seek_motion(self, e)
     def on_seek_release(self, e):
-        if self.is_seeking: self._update_seek_from_mouse(e)
-        self.is_seeking = False
-        if self.player:
-            if getattr(self, '_was_playing_before_seek', False):
-                self.player.play() # ?癒?삋 ??源??怨밴묶????삠늺 ??源?
-            else:
-                self.player.pause() # ?癒?삋 ??깅뻻?類? ?怨밴묶????삠늺 ?類?
-            # 筌앸맩??獒뺛끋????곸젫 ?????봺揶쎛 ??????됰선 ??꾩퍢????뺤쟿??
-            self.root.after(100, lambda: self.player.set_mute(False) if self.player else None)
-        self._sync_audio_clip_playback(force_seek=True)
+        return ui_on_seek_release(self, e)
     def _update_seek_from_mouse(self, e):
         try:
             w = self.seek_bar.winfo_width()
@@ -2722,14 +2680,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     for i, r in enumerate(self.results_data):
                         writer.writerow([i+1, r['s'], r['e'], r['t']])
             messagebox.showinfo('?꾨즺', '??λ릺?덉뒿?덈떎.')
-
-
-
-
-
-
-
-
 
 
 
