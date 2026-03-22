@@ -178,6 +178,11 @@ class CustomModelApp:
         self.stop_event = threading.Event()
         self.analysis_thread = None
         self._is_closing = False
+        self._analysis_in_progress = False
+        self._live_block_render_limit = 200
+        self._live_preview_segment_limit = 250
+        self._block_render_after_id = None
+        self._preview_after_id = None
         self.transcript_manager = TranscriptManager()
         self.current_video_path = None
         self.is_seeking = False
@@ -204,6 +209,7 @@ class CustomModelApp:
         """Clean up temp files and stop background work before exit."""
         self._is_closing = True
         self.stop_event.set()
+        self._cancel_scheduled_live_updates()
         try:
             import glob
             import shutil
@@ -265,18 +271,49 @@ class CustomModelApp:
 
     def _on_progress(self, task):
         self.progress_var.set(task["value"]); self.lbl_status.config(text=task["text"])
+
+    def _cancel_scheduled_live_updates(self):
+        for attr_name in ("_add_row_debounce", "_block_render_after_id", "_preview_after_id"):
+            after_id = getattr(self, attr_name, None)
+            if after_id:
+                try:
+                    self.root.after_cancel(after_id)
+                except Exception:
+                    pass
+                setattr(self, attr_name, None)
+
+    def _schedule_block_render(self, delay_ms=250):
+        if getattr(self, "_block_render_after_id", None):
+            self.root.after_cancel(self._block_render_after_id)
+        self._block_render_after_id = self.root.after(delay_ms, self._run_block_render)
+
+    def _run_block_render(self):
+        self._block_render_after_id = None
+        if hasattr(self, 'block_editor'):
+            self.block_editor.render_block_view()
+
+    def _schedule_preview_reload(self, force_reload=False, delay_ms=500):
+        if getattr(self, "_preview_after_id", None):
+            self.root.after_cancel(self._preview_after_id)
+        self._preview_after_id = self.root.after(delay_ms, lambda: self._run_preview_reload(force_reload))
+
+    def _run_preview_reload(self, force_reload=False):
+        self._preview_after_id = None
+        self.apply_preview_subtitles(force_reload=force_reload)
         
     def _on_add_row(self, task):
         self.tree.insert("", "end", values=(task["i"], self.format_time(task['s']), self.format_time(task['e']), task['t']))
         if hasattr(self, 'block_editor'):
-            self.block_editor.render_block_view()
+            if (not self._analysis_in_progress) or len(self.results_data) <= self._live_block_render_limit:
+                self._schedule_block_render(delay_ms=250)
             
         # [사용자 요청] 분석 중 생성되는 자막을 영상에 실시간으로 입힘 (디바운스로 부하 제어)
-        if getattr(self, '_add_row_debounce', None):
-            self.root.after_cancel(self._add_row_debounce)
-        self._add_row_debounce = self.root.after(500, lambda: self.apply_preview_subtitles(force_reload=False))
+        if (not self._analysis_in_progress) or len(self.results_data) <= self._live_preview_segment_limit:
+            self._schedule_preview_reload(force_reload=False, delay_ms=1000 if self._analysis_in_progress else 500)
         
     def _on_complete(self, task):
+        self._analysis_in_progress = False
+        self._cancel_scheduled_live_updates()
         self.analysis_thread = None
         self.lbl_status.config(text=task["text"], fg=self.C['green']); self.progress_var.set(100)
         self.btn_analyze.config(state=tk.NORMAL)
@@ -284,15 +321,21 @@ class CustomModelApp:
             self.save_frame.pack(fill=tk.X, pady=5, before=self.lbl_status)
             for b in [self.btn_fast_save, self.btn_pro_save]: b.config(state=tk.NORMAL)
         
+        if hasattr(self, 'block_editor'):
+            self.block_editor.render_block_view()
         if task.get("is_whisper"): self.apply_preview_subtitles()
         self.btn_stop.config(state=tk.DISABLED)
 
     def _on_error(self, task):
+        self._analysis_in_progress = False
+        self._cancel_scheduled_live_updates()
         self.analysis_thread = None
         self.btn_stop.config(state=tk.DISABLED)
         messagebox.showerror("Error", task["text"])
 
     def _on_ghost_defense(self):
+        self._analysis_in_progress = False
+        self._cancel_scheduled_live_updates()
         self.analysis_thread = None
         self.reset_action_button()
         self.btn_stop.config(state=tk.DISABLED)
@@ -807,12 +850,14 @@ class CustomModelApp:
         stopped = self.controller.wait_for_stop(self.stop_event, active_thread, timeout=timeout)
         if stopped:
             self.analysis_thread = None
+        self._analysis_in_progress = False
         self.stop_event = threading.Event()
         return stopped
 
     def reset_for_new_video(self):
         """Clear previous analysis state when selecting a new video."""
         self._stop_active_analysis(timeout=10.0)
+        self._cancel_scheduled_live_updates()
         self.results_data = []
         self.tree.delete(*self.tree.get_children())
         self.progress_var.set(0)
@@ -874,6 +919,8 @@ class CustomModelApp:
     def on_stop_action(self):
         if self.stop_event and not self.stop_event.is_set(): 
             self.stop_event.set()
+            self._analysis_in_progress = False
+            self._cancel_scheduled_live_updates()
             # 큐를 완전 증발 시킬 필요가 없어짐 (이벤트 구독 구조이므로 stop_event가 set되면 컨트롤러가 발송 중단함)
             self.lbl_status.config(text="■ 작업 중지 중... 완전 종료 대기", fg=self.C['red'])
             self.btn_stop.config(state=tk.DISABLED)
@@ -910,6 +957,8 @@ class CustomModelApp:
             device_mode=mapped_dev
         )
         
+        self._cancel_scheduled_live_updates()
+        self._analysis_in_progress = True
         self.stop_event = threading.Event(); self.btn_analyze.config(state=tk.DISABLED); self.btn_stop.config(state=tk.NORMAL); self.progress_var.set(0); self.results_data = []
         for i in self.tree.get_children(): self.tree.delete(i)
         
