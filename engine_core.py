@@ -124,6 +124,17 @@ class HyperTranscriptionEngine:
                 torch.mps.empty_cache()
         except Exception as e:
             print(f"[WARN] release_runtime_memory failed: {e}")
+
+    def release_analysis_memory(self):
+        """Drop per-analysis caches without forcing full model reload during the same run."""
+        try:
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                torch.mps.empty_cache()
+        except Exception as e:
+            print(f"[WARN] release_analysis_memory failed: {e}")
         
     def _get_base_dir(self):
         if getattr(sys, "frozen", False):
@@ -415,7 +426,6 @@ class HyperTranscriptionEngine:
             self.fw_model = None  # Force reload model
 
     def get_vad_model(self, device_mode="auto"):
-        best_dev = self._detect_best_device(device_mode)
         if self.vad_model is None:
             target_threads = self._get_target_cores(device_mode)
             torch.set_num_threads(target_threads)
@@ -425,10 +435,6 @@ class HyperTranscriptionEngine:
                 warnings.filterwarnings("ignore", category=UserWarning)
                 self.vad_model = load_silero_vad()
             self.vad_device_info = "cpu"
-
-        if self.vad_device_info != best_dev:
-            self.vad_model = self.vad_model.to(best_dev)
-            self.vad_device_info = best_dev
                 
         return self.vad_model
 
@@ -461,10 +467,22 @@ class HyperTranscriptionEngine:
     def load_audio_to_memory(self, video_path):
         return AudioProcessor.load_audio_to_memory(video_path, self.ffmpeg_exe)
 
+    def probe_audio_duration(self, video_path):
+        return AudioProcessor.probe_audio_duration(video_path, self.ffmpeg_exe)
+
+    def iter_audio_chunks(self, video_path, chunk_duration_sec=600):
+        return AudioProcessor.iter_audio_chunks(video_path, self.ffmpeg_exe, chunk_duration_sec=chunk_duration_sec)
+
     def detect_speech_vad_stream(self, audio_data, stop_event, min_silence_ms=2000, speech_pad_ms=250, options=None):
-        options = options or {}
-        device_mode = options.get("device_mode", "auto")
-        vad_threshold = options.get("vad_threshold", 0.35)
+        if options is None:
+            device_mode = "auto"
+            vad_threshold = 0.35
+        elif isinstance(options, dict):
+            device_mode = options.get("device_mode", "auto")
+            vad_threshold = options.get("vad_threshold", 0.35)
+        else:
+            device_mode = getattr(options, "device_mode", "auto")
+            vad_threshold = getattr(options, "vad_threshold", 0.35)
         model = self.get_vad_model(device_mode)
         sample_rate, chunk_size, overlap = 16000, 16000 * 60, 16000 * 2
         total_samples = len(audio_data)

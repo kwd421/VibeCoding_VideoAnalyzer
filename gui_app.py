@@ -311,9 +311,12 @@ class CustomModelApp:
                     return 0
                 return -1 if event.delta > 0 else 1
             return int(-1 * (event.delta / 120))
+        def _is_vertical_wheel(event):
+            return not bool(getattr(event, 'state', 0) & 0x1)
         def _bind_mousewheel_recursive(widget, handler):
             try:
                 widget.bind('<MouseWheel>', handler, add='+')
+                widget.bind('<Shift-MouseWheel>', lambda e: 'break', add='+')
             except Exception:
                 pass
             for child in widget.winfo_children():
@@ -423,6 +426,8 @@ class CustomModelApp:
         insp_scroll.configure(yscrollcommand=insp_sb.set)
         insp_sb.pack(side=tk.RIGHT, fill=tk.Y); insp_scroll.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         def _scroll_inspector(ev):
+            if not _is_vertical_wheel(ev):
+                return 'break'
             units = _wheel_units(ev)
             if units != 0:
                 insp_scroll.yview_scroll(units, 'units')

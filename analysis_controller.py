@@ -1,5 +1,7 @@
 import time
 import threading
+import gc
+from config_models import TranscriptSegment, TranscriptWord
 
 class AnalysisController:
     """[시니어 컨트롤러] 엔진의 분석 루프와 렌더링 작업을 주관하는 컨트롤러 (GUI와 비동기 로직 분리)"""
@@ -12,11 +14,41 @@ class AnalysisController:
     def run_analysis(self, p, stop_ev, mode, min_sil_ms, pad_ms, max_chars, options=None):
         try:
             start_time = time.time()
+            chunk_duration_sec = 600.0
             
             # 콜백을 통해 UI 액션(이벤트 명)을 변환
             def dispatch_ui(task):
                 action = task.pop("action")
                 self.dispatcher.emit(action, task)
+
+            def offset_result(item, offset_sec):
+                if isinstance(item, TranscriptSegment):
+                    shifted_words = [
+                        TranscriptWord(word=w.word, s=w.s + offset_sec, e=w.e + offset_sec)
+                        for w in (item.words or [])
+                    ]
+                    return TranscriptSegment(
+                        s=item.s + offset_sec,
+                        e=item.e + offset_sec,
+                        t=item.t,
+                        words=shifted_words,
+                    )
+
+                shifted = dict(item)
+                shifted["s"] = shifted.get("s", 0.0) + offset_sec
+                shifted["e"] = shifted.get("e", 0.0) + offset_sec
+                if "words" in shifted and shifted["words"]:
+                    shifted["words"] = [
+                        {"word": w["word"], "s": w["s"] + offset_sec, "e": w["e"] + offset_sec}
+                        for w in shifted["words"]
+                    ]
+                return shifted
+
+            def total_progress(chunk_start_sec, chunk_duration, local_progress, total_duration):
+                if total_duration <= 0:
+                    return 0.0
+                processed = chunk_start_sec + (chunk_duration * (local_progress / 100.0))
+                return min(100.0, max(0.0, (processed / total_duration) * 100.0))
 
             if "자동 챕터 분할" in mode:
                 labels = ["a person talking to camera, just chatting", "video game play screen", "web browser or document screen"]
@@ -29,59 +61,83 @@ class AnalysisController:
                     self.dispatcher.emit("complete", {"text": f"챕터 분석 완료 (소요 시간: {total_elapsed//60}분 {total_elapsed%60}초)", "is_vad": True})
                 return
 
-            audio_data, duration = self.engine.load_audio_to_memory(p)
+            duration = self.engine.probe_audio_duration(p)
             if stop_ev.is_set(): return
             
             if mode == "무음 제거 편집 (VAD)":
-                for chunk_res, prog in self.engine.detect_speech_vad_stream(audio_data, stop_ev, min_sil_ms, pad_ms, options=options):
+                for audio_data, chunk_start_sec, chunk_duration in self.engine.iter_audio_chunks(p, chunk_duration_sec=chunk_duration_sec):
                     if stop_ev.is_set(): break
-                    elapsed = time.time() - start_time
-                    eta = int((elapsed / prog) * (100 - prog)) if prog > 5 else -1
-                    self.dispatcher.emit("progress", {"value": prog, "text": f"VAD 분석 중 ({int(prog)}%){f' (남은 시간: {eta//60}분 {eta%60}초)' if eta >= 0 else ''}"})
-                    for r in chunk_res: self.transcript_manager.add_segment(r, dispatch_ui)
+                    try:
+                        for chunk_res, prog in self.engine.detect_speech_vad_stream(audio_data, stop_ev, min_sil_ms, pad_ms, options=options):
+                            if stop_ev.is_set(): break
+                            overall_prog = total_progress(chunk_start_sec, chunk_duration, prog, duration)
+                            elapsed = time.time() - start_time
+                            eta = int((elapsed / overall_prog) * (100 - overall_prog)) if overall_prog > 5 else -1
+                            self.dispatcher.emit("progress", {"value": overall_prog, "text": f"VAD 분석 중 ({int(overall_prog)}%){f' (남은 시간: {eta//60}분 {eta%60}초)' if eta >= 0 else ''}"})
+                            for r in chunk_res:
+                                self.transcript_manager.add_segment(offset_result(r, chunk_start_sec), dispatch_ui)
+                    finally:
+                        del audio_data
+                        self.engine.release_analysis_memory()
+                        gc.collect()
                 if not stop_ev.is_set():
                     total_elapsed = int(time.time() - start_time)
                     self.dispatcher.emit("complete", {"text": f"분석 완료 (소요 시간: {total_elapsed//60}분 {total_elapsed%60}초)", "is_vad": True})
             
             elif "깜놀" in mode:
-                for chunk_res, prog in self.engine.detect_peaks_stream(audio_data, stop_ev):
+                for audio_data, chunk_start_sec, chunk_duration in self.engine.iter_audio_chunks(p, chunk_duration_sec=chunk_duration_sec):
                     if stop_ev.is_set(): break
-                    elapsed = time.time() - start_time
-                    eta = int((elapsed / prog) * (100 - prog)) if prog > 5 else -1
-                    self.dispatcher.emit("progress", {"value": prog, "text": f"피크 감지 중 ({int(prog)}%){f' (남은 시간: {eta//60}분 {eta%60}초)' if eta >= 0 else ''}"})
-                    for r in chunk_res: self.transcript_manager.add_segment(r, dispatch_ui)
+                    try:
+                        for chunk_res, prog in self.engine.detect_peaks_stream(audio_data, stop_ev):
+                            if stop_ev.is_set(): break
+                            overall_prog = total_progress(chunk_start_sec, chunk_duration, prog, duration)
+                            elapsed = time.time() - start_time
+                            eta = int((elapsed / overall_prog) * (100 - overall_prog)) if overall_prog > 5 else -1
+                            self.dispatcher.emit("progress", {"value": overall_prog, "text": f"피크 감지 중 ({int(overall_prog)}%){f' (남은 시간: {eta//60}분 {eta%60}초)' if eta >= 0 else ''}"})
+                            for r in chunk_res:
+                                self.transcript_manager.add_segment(offset_result(r, chunk_start_sec), dispatch_ui)
+                    finally:
+                        del audio_data
+                        self.engine.release_analysis_memory()
+                        gc.collect()
                 if not stop_ev.is_set():
                     total_elapsed = int(time.time() - start_time)
                     self.dispatcher.emit("complete", {"text": f"분석 완료 (소요 시간: {total_elapsed//60}분 {total_elapsed%60}초)", "is_vad": False})
             
             else:
-                gen, total_dur = self.engine.transcribe_stream_raw(audio_data, stop_ev, options=options)
-                for r in gen:
+                for audio_data, chunk_start_sec, chunk_duration in self.engine.iter_audio_chunks(p, chunk_duration_sec=chunk_duration_sec):
                     if stop_ev.is_set(): break
-                    
-                    # --- [추가] 하트비트를 수신하여 안정적인 ETA 계산 ---
-                    if isinstance(r, dict) and r.get("is_heartbeat"):
-                        prog = r["progress"]
-                        elapsed = time.time() - start_time
-                        if prog > 0.5: # 초기 튐 현상 방지
-                            eta = int((elapsed / prog) * (100 - prog))
-                            eta_str = f" (남은 시간: {eta//60}분 {eta%60}초)" if eta >= 0 else " (남은 시간 계산 중...)"
-                            self.dispatcher.emit("progress", {"value": prog, "text": f"Whisper 분석 중 ({int(prog)}%){eta_str}"})
-                        continue
+                    try:
+                        gen, _ = self.engine.transcribe_stream_raw(audio_data, stop_ev, options=options)
+                        for r in gen:
+                            if stop_ev.is_set(): break
+                            
+                            if isinstance(r, dict) and r.get("is_heartbeat"):
+                                overall_prog = total_progress(chunk_start_sec, chunk_duration, r["progress"], duration)
+                                elapsed = time.time() - start_time
+                                if overall_prog > 0.5:
+                                    eta = int((elapsed / overall_prog) * (100 - overall_prog))
+                                    eta_str = f" (남은 시간: {eta//60}분 {eta%60}초)" if eta >= 0 else " (남은 시간 계산 중...)"
+                                    self.dispatcher.emit("progress", {"value": overall_prog, "text": f"Whisper 분석 중 ({int(overall_prog)}%){eta_str}"})
+                                continue
 
-                    # (기존의 자막 분할 및 추가 로직)
-                    text = r['t'].strip()
-                    if len(text) > max_chars:
-                        chunks = self.transcript_manager.smart_split_text(text, max_chars)
-                        total_char_len = sum(len(c) for c in chunks)
-                        curr_ratio = 0.0
-                        for c in chunks:
-                            if not c: continue
-                            ratio = len(c) / total_char_len
-                            self.transcript_manager.add_segment({'s': r['s'] + (r['e']-r['s'])*curr_ratio, 'e': r['s'] + (r['e']-r['s'])*(curr_ratio+ratio), 't': c}, dispatch_ui)
-                            curr_ratio += ratio
-                    else:
-                        self.transcript_manager.add_segment(r, dispatch_ui)
+                            shifted = offset_result(r, chunk_start_sec)
+                            text = shifted['t'].strip()
+                            if len(text) > max_chars:
+                                chunks = self.transcript_manager.smart_split_text(text, max_chars)
+                                total_char_len = sum(len(c) for c in chunks)
+                                curr_ratio = 0.0
+                                for c in chunks:
+                                    if not c: continue
+                                    ratio = len(c) / total_char_len
+                                    self.transcript_manager.add_segment({'s': shifted['s'] + (shifted['e']-shifted['s'])*curr_ratio, 'e': shifted['s'] + (shifted['e']-shifted['s'])*(curr_ratio+ratio), 't': c}, dispatch_ui)
+                                    curr_ratio += ratio
+                            else:
+                                self.transcript_manager.add_segment(shifted, dispatch_ui)
+                    finally:
+                        del audio_data
+                        self.engine.release_analysis_memory()
+                        gc.collect()
                 
                 if not stop_ev.is_set(): 
                     is_combi = "컷편집" in mode or "자연어" in mode
@@ -93,7 +149,8 @@ class AnalysisController:
         finally:
             if 'audio_data' in locals():
                 del audio_data
-            import gc; gc.collect()
+            self.engine.release_runtime_memory()
+            gc.collect()
             if stop_ev.is_set(): 
                 self.dispatcher.emit("ghost_defense", {})
 

@@ -2,6 +2,7 @@ import numpy as np
 import subprocess
 import noisereduce as nr
 import imageio_ffmpeg
+import re
 from config_models import TranscriptSegment
 
 class AudioProcessor:
@@ -21,6 +22,61 @@ class AudioProcessor:
             import gc; gc.collect()
             return audio_np, duration
         except Exception as e: raise RuntimeError(f"메모리 로드 오류: {e}")
+
+    @staticmethod
+    def probe_audio_duration(video_path, ffmpeg_exe=None):
+        if ffmpeg_exe is None:
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        cmd = [ffmpeg_exe, '-i', video_path]
+        try:
+            proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+            output = proc.stderr or ""
+            match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", output)
+            if not match:
+                raise RuntimeError("duration not found")
+            hours, minutes, seconds = match.groups()
+            return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+        except Exception as e:
+            raise RuntimeError(f"길이 조회 오류: {e}")
+
+    @staticmethod
+    def iter_audio_chunks(video_path, ffmpeg_exe=None, chunk_duration_sec=600):
+        if ffmpeg_exe is None:
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
+        sample_rate = 16000
+        bytes_per_sample = 2
+        bytes_per_chunk = int(chunk_duration_sec * sample_rate * bytes_per_sample)
+        cmd = [ffmpeg_exe, '-v', 'error', '-i', video_path, '-vn', '-acodec', 'pcm_s16le', '-ar', str(sample_rate), '-ac', '1', '-f', 's16le', '-']
+        process = None
+        chunk_index = 0
+        try:
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            while True:
+                raw_audio = process.stdout.read(bytes_per_chunk)
+                if not raw_audio:
+                    break
+                audio_np = np.frombuffer(raw_audio, dtype=np.int16).astype(np.float32) / 32768.0
+                chunk_start_sec = chunk_index * chunk_duration_sec
+                actual_duration = len(audio_np) / sample_rate
+                yield audio_np, chunk_start_sec, actual_duration
+                del raw_audio
+                chunk_index += 1
+
+            stderr_output = process.stderr.read().decode("utf-8", errors="ignore") if process.stderr else ""
+            return_code = process.wait()
+            if return_code != 0:
+                raise RuntimeError(stderr_output.strip() or f"ffmpeg exited with code {return_code}")
+        except Exception as e:
+            raise RuntimeError(f"청크 오디오 스트리밍 오류: {e}")
+        finally:
+            if process is not None:
+                if process.stdout:
+                    process.stdout.close()
+                if process.stderr:
+                    process.stderr.close()
+                if process.poll() is None:
+                    process.kill()
 
     @staticmethod
     def detect_peaks_stream(audio, stop_event):

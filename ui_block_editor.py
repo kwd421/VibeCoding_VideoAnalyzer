@@ -23,6 +23,10 @@ class UIBlockEditor:
             return -1 if event.delta > 0 else 1 if event.delta < 0 else 0
         return int(-1 * (event.delta / 120))
 
+    @staticmethod
+    def is_vertical_scroll_event(event):
+        return not bool(getattr(event, "state", 0) & 0x1)
+
     @property
     def player(self):
         """항상 최신 VLC player 인스턴스를 동적으로 반환"""
@@ -55,8 +59,11 @@ class UIBlockEditor:
         self.block_canvas.bind("<ButtonRelease-1>", self.on_block_release)
         self.block_canvas.bind("<Double-1>", self.on_block_double)
         self.block_canvas.bind("<MouseWheel>", self.on_block_scroll)
+        self.block_canvas.bind("<Shift-MouseWheel>", lambda e: "break")
         self.parent.bind("<MouseWheel>", self.on_block_scroll)
+        self.parent.bind("<Shift-MouseWheel>", lambda e: "break")
         sc.bind("<MouseWheel>", self.on_block_scroll)
+        sc.bind("<Shift-MouseWheel>", lambda e: "break")
         
         def _on_enter(e):
             self.root.bind_all("<Delete>", self.on_block_delete)
@@ -81,6 +88,8 @@ class UIBlockEditor:
         self.active_entry_save_cb = None  # 강제 저장을 위한 콜백 저장
 
     def on_block_scroll(self, event):
+        if not self.is_vertical_scroll_event(event):
+            return "break"
         # [사용자 요청] Ctrl+휠: 단어 블록 또는 행/시간 미세 조정 및 즉시 재생
         if event.state & 0x4: # Ctrl key
             # [시니어 수정] 캔버스 좌표 점검 (스크롤 대응)
