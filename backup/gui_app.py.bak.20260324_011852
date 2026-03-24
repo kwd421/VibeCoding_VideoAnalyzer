@@ -488,7 +488,7 @@ class CustomModelApp:
         
         # ── 카드 1: 소스 및 엔진 ──
         c1 = _card(insp_inner, '🎬  소스 및 엔진')
-        bf = tk.Button(c1, text='  📂  영상 파일 선택  ', command=self.on_select_video, bg=C['surface'], fg=C['text'], font=_f, relief='flat', bd=0, compound='center', pady=8, cursor='hand2'); bf.pack(fill=tk.X, pady=(0,6))
+        bf = tk.Button(c1, text='  📂  영상 파일 선택  ', command=self.on_select_video, bg=C['surface'], fg=C['text'], activebackground=C['surface'], activeforeground=C['text'], disabledforeground=C['text'], font=_f, relief='flat', bd=0, compound='center', pady=8, cursor='hand2'); bf.pack(fill=tk.X, pady=(0,6))
         r = _row(c1); tk.Label(r, text='AI 모델', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
         self.ai_model_var = tk.StringVar(value='large-v3-turbo (기본)')
         self.ai_model_combo = ttk.Combobox(r, textvariable=self.ai_model_var, values=AI_MODEL_LABELS, state='readonly', width=36); self.ai_model_combo.pack(side=tk.RIGHT)
@@ -512,8 +512,8 @@ class CustomModelApp:
                 self.mode_var.set('자연어-대사 변환') # 사용 가능한 모드로 자동 전환
             self.reset_action_button()
         self.mode_var.trace_add('write', _check_mode)
-        self.btn_analyze = tk.Button(c2, text='  분석 시작  ', command=self.on_start_analysis, bg=C['surface'], fg=C['text'], font=('Noto Sans KR', 13, 'bold'), relief='flat', bd=0, compound='center', pady=10, cursor='hand2'); self.btn_analyze.pack(fill=tk.X, pady=(0,4))
-        self.btn_stop = tk.Button(c2, text='  작업 중지  ', command=self.on_stop_action, bg=C['surface'], fg=C['text'], disabledforeground=C['text'], font=_fb, relief='flat', bd=0, compound='center', state=tk.DISABLED, pady=5, cursor='hand2'); self.btn_stop.pack(fill=tk.X)
+        self.btn_analyze = tk.Button(c2, text='  분석 시작  ', command=self.on_start_analysis, bg=C['surface'], fg=C['text'], activebackground=C['surface'], activeforeground=C['text'], disabledforeground=C['text'], font=('Noto Sans KR', 13, 'bold'), relief='flat', bd=0, compound='center', pady=10, cursor='hand2'); self.btn_analyze.pack(fill=tk.X, pady=(0,4))
+        self.btn_stop = tk.Button(c2, text='  작업 중지  ', command=self.on_stop_action, bg=C['surface'], fg=C['text'], activebackground=C['surface'], activeforeground=C['text'], disabledforeground=C['text'], font=_fb, relief='flat', bd=0, compound='center', state=tk.DISABLED, pady=5, cursor='hand2'); self.btn_stop.pack(fill=tk.X)
         self.lbl_status = LblMarquee(c2, text='준비됨', fg=C['green'], bg=C['bg2'], font=_f); self.lbl_status.pack(fill=tk.X, pady=(6,0))
         self.progress_var = tk.DoubleVar(); ttk.Progressbar(c2, variable=self.progress_var).pack(fill=tk.X, pady=(4,0))
         self.use_burn_sub_var = tk.BooleanVar(value=False)
@@ -641,7 +641,7 @@ class CustomModelApp:
         c4 = _card(insp_inner, '📤  내보내기')
         r = _row(c4); tk.Label(r, text='포맷', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
         self.export_format = tk.StringVar(value='SRT'); ttk.Combobox(r, textvariable=self.export_format, values=['SRT', 'VTT', 'TXT', 'CSV', 'FCPXML'], state='readonly', width=8).pack(side=tk.RIGHT)
-        bx = tk.Button(c4, text='  📄 자막 내보내기  ', command=self.export_subtitles, bg=C['surface'], fg=C['text'], font=_fb, relief='flat', bd=0, compound='center', pady=8, cursor='hand2'); bx.pack(fill=tk.X, pady=(8,0))
+        bx = tk.Button(c4, text='  📄 자막 내보내기  ', command=self.export_subtitles, bg=C['surface'], fg=C['text'], activebackground=C['surface'], activeforeground=C['text'], disabledforeground=C['text'], font=_fb, relief='flat', bd=0, compound='center', pady=8, cursor='hand2'); bx.pack(fill=tk.X, pady=(8,0))
         
         # [Apple HIG] 컨텍스트 메뉴 및 이벤트 바인딩
         self.menu = tk.Menu(self.root, tearoff=0, bg=C['bg2'], fg=C['text'], activebackground=C['accent'], activeforeground='white', font=_f)
@@ -838,7 +838,7 @@ class CustomModelApp:
 
     def load_engine_async(self): threading.Thread(target=self.controller.init_engine, daemon=True).start()
 
-    def reset_action_button(self): self.save_frame.pack_forget(); self.btn_analyze.config(text="  분석 시작  ", command=self.on_start_analysis, bg=self.C['surface'], fg=self.C['text'], disabledforeground=self.C['text'], state=tk.NORMAL); self.btn_fast_save.config(state=tk.NORMAL); self.btn_pro_save.config(state=tk.NORMAL)
+    def reset_action_button(self): self.save_frame.pack_forget(); self.btn_analyze.config(text="  분석 시작  ", command=self.on_start_analysis, bg=self.C['surface'], fg=self.C['text'], activebackground=self.C['surface'], activeforeground=self.C['text'], disabledforeground=self.C['text'], state=tk.NORMAL); self.btn_fast_save.config(state=tk.NORMAL); self.btn_pro_save.config(state=tk.NORMAL)
     def _stop_active_analysis(self, timeout=10.0):
         active_thread = self.analysis_thread
         stopped = self.controller.wait_for_stop(self.stop_event, active_thread, timeout=timeout)
