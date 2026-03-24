@@ -15,10 +15,6 @@ class AnalysisController:
         try:
             start_time = time.time()
             chunk_duration_sec = 600.0
-            if options and getattr(options, "use_denoise", False):
-                # Denoise는 chunk 전체를 한 번 더 큰 배열로 잡아먹으므로
-                # 실험 옵션이 켜진 경우에만 chunk 크기를 줄여 peak memory를 낮춘다.
-                chunk_duration_sec = 180.0
             
             # 콜백을 통해 UI 액션(이벤트 명)을 변환
             def dispatch_ui(task):

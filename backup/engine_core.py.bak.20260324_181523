@@ -396,12 +396,10 @@ class HyperTranscriptionEngine:
             print(f"[INFO] Using whisper.cpp Core ML backend: {model_path}")
         return self.whispercpp_model
 
-    def _transcribe_with_coreml(self, audio_chunk, selected_lang, use_word_timestamps, use_worker=False):
+    def _transcribe_with_coreml(self, audio_chunk, selected_lang, use_word_timestamps):
         if os.environ.get("VIBE_COREML_CHILD") == "1":
             return self._transcribe_with_coreml_local(audio_chunk, selected_lang, use_word_timestamps)
-        if use_worker:
-            return self._transcribe_with_coreml_subprocess(audio_chunk, selected_lang, use_word_timestamps)
-        return self._transcribe_with_coreml_local(audio_chunk, selected_lang, use_word_timestamps)
+        return self._transcribe_with_coreml_subprocess(audio_chunk, selected_lang, use_word_timestamps)
 
     def _transcribe_with_coreml_local(self, audio_chunk, selected_lang, use_word_timestamps):
         model = self._get_whispercpp_model("coreml")
@@ -599,7 +597,6 @@ class HyperTranscriptionEngine:
         use_whisper_vad = options.use_whisper_vad
         use_silero_vad = options.use_silero_vad
         use_start_time_trim = getattr(options, "use_start_time_trim", False)
-        use_coreml_worker = getattr(options, "use_coreml_worker", False)
         runtime_whisper_vad = {"enabled": use_whisper_vad}
         use_whisperx_align = options.use_whisperx_align
         filler_words = {"어", "음", "아", "으", "에", "이", "오", "우", "그", "저", "뭐", "막", "좀", "그냥"}
@@ -692,7 +689,7 @@ class HyperTranscriptionEngine:
                             
                         try:
                             if self._use_coreml_backend(device_mode):
-                                segs_list = self._transcribe_with_coreml(sub_chunk, selected_lang, use_word_timestamps, use_worker=use_coreml_worker)
+                                segs_list = self._transcribe_with_coreml(sub_chunk, selected_lang, use_word_timestamps)
                             elif self._use_torch_whisper_backend(device_mode):
                                 segs_list = self._transcribe_with_torch_whisper(sub_chunk, selected_lang, use_word_timestamps)
                             else:

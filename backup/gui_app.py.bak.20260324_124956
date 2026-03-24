@@ -532,9 +532,7 @@ class CustomModelApp:
         
         chk_cfg = dict(bg=C['bg2'], selectcolor=C['bg3'], activebackground=C['bg2'], font=_f, relief=tk.FLAT, bd=0)
         self.remove_punctuation_var = tk.BooleanVar(value=True); tk.Checkbutton(c3, text='✂️문장부호 제거', variable=self.remove_punctuation_var, fg=C['text2'], **chk_cfg).pack(anchor=tk.W, pady=1)
-        self.use_denoise_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🧪 배경음 줄이기 (실험)', variable=self.use_denoise_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
-        self.use_start_time_trim_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🧪 자막 시작점 보정 (실험)', variable=self.use_start_time_trim_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
-        self.use_coreml_worker_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🧪 CoreML 메모리 절약 모드 (실험)', variable=self.use_coreml_worker_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
+        self.use_denoise_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🧪 Speech Enhancement / Denoise (실험)', variable=self.use_denoise_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         _sep(c3)
         self.use_silero_vad_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='외부 VAD (Silero)', variable=self.use_silero_vad_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         self.use_whisper_vad_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='내부 VAD (Whisper)', variable=self.use_whisper_vad_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
@@ -950,8 +948,6 @@ class CustomModelApp:
             use_silero_vad=self.use_silero_vad_var.get(),
             use_whisperx_align=getattr(self, 'use_whisperx_var', tk.BooleanVar(value=False)).get(),
             remove_punctuation=getattr(self, 'remove_punctuation_var', tk.BooleanVar(value=False)).get(),
-            use_start_time_trim=getattr(self, 'use_start_time_trim_var', tk.BooleanVar(value=False)).get(),
-            use_coreml_worker=getattr(self, 'use_coreml_worker_var', tk.BooleanVar(value=False)).get(),
             device_mode=mapped_dev
         )
         

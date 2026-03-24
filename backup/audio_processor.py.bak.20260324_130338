@@ -102,31 +102,9 @@ class AudioProcessor:
     def denoise_audio(audio_data):
         """[시니어 최적화] noisereduce를 이용한 고성능 배경 소음 제거 (Stationary Noise Reduction)"""
         try:
-            sample_count = len(audio_data)
-            if sample_count < 512:
-                return audio_data
-
-            # 짧은 trailing chunk에서는 STFT 기본값이 과도해 예외가 날 수 있으므로
-            # 입력 길이에 맞춰 FFT/overlap 파라미터를 보수적으로 축소한다.
-            n_fft = min(1024, sample_count)
-            if n_fft < 64:
-                return audio_data
-
-            win_length = n_fft
-            hop_length = max(16, n_fft // 4)
-            if hop_length >= n_fft:
-                hop_length = max(8, n_fft // 2)
-
-            denoised = nr.reduce_noise(
-                y=np.asarray(audio_data, dtype=np.float32),
-                sr=16000,
-                stationary=True,
-                prop_decrease=0.75,
-                n_fft=n_fft,
-                win_length=win_length,
-                hop_length=hop_length,
-            )
-            return np.asarray(denoised, dtype=np.float32)
+            # stationary=True: 배경 소음이 일정한 경우(선풍기, 에어컨 등)에 최적화
+            denoised = nr.reduce_noise(y=audio_data, sr=16000, stationary=True, prop_decrease=0.75)
+            return denoised
         except Exception as e:
             print(f"Denoise Error: {e}")
             return audio_data
