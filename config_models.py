@@ -16,6 +16,7 @@ class AnalysisSettings:
     use_whisper_vad: bool = False
     use_silero_vad: bool = False
     use_whisperx_align: bool = False  # WhisperX forced alignment 사용 여부
+    use_whisperx_short_fallback: bool = False  # 짧은 발화에서 과도한 축약 시 원본 타이밍 유지
     remove_punctuation: bool = False
     use_coreml_worker: bool = False
 

@@ -538,6 +538,7 @@ class CustomModelApp:
         self.use_silero_vad_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='외부 VAD (Silero)', variable=self.use_silero_vad_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         self.use_whisper_vad_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='내부 VAD (Whisper)', variable=self.use_whisper_vad_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         self.use_whisperx_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🎯 WhisperX 단어 싱크 보정', variable=self.use_whisperx_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
+        self.use_whisperx_short_fallback_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🧪 WhisperX 짧은 대사 원본 유지', variable=self.use_whisperx_short_fallback_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         _sep(c3)
         
         r = _row(c3); tk.Label(r, text='무음 길이', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
@@ -942,6 +943,7 @@ class CustomModelApp:
             use_whisper_vad=self.use_whisper_vad_var.get(),
             use_silero_vad=self.use_silero_vad_var.get(),
             use_whisperx_align=getattr(self, 'use_whisperx_var', tk.BooleanVar(value=False)).get(),
+            use_whisperx_short_fallback=getattr(self, 'use_whisperx_short_fallback_var', tk.BooleanVar(value=False)).get(),
             remove_punctuation=getattr(self, 'remove_punctuation_var', tk.BooleanVar(value=False)).get(),
             use_coreml_worker=getattr(self, 'use_coreml_worker_var', tk.BooleanVar(value=False)).get(),
             device_mode=mapped_dev

@@ -109,6 +109,26 @@ class HyperTranscriptionEngine:
         self.device_info = "auto"
         self.align_models_cache = {}    # [캐싱] (언어, 디바이스)별 WhisperX 정렬 모델
 
+    @staticmethod
+    def _should_fallback_short_whisperx_segment(orig_seg, aligned_seg):
+        """Use original timings when WhisperX over-compresses very short utterances.
+
+        This is intentionally conservative so longer lines keep their improved starts.
+        """
+        orig_duration = max(0.0, float(orig_seg.end) - float(orig_seg.start))
+        aligned_duration = max(0.0, float(aligned_seg.end) - float(aligned_seg.start))
+        if orig_duration <= 0.0 or aligned_duration <= 0.0:
+            return False
+        if orig_duration > 1.8:
+            return False
+        if aligned_duration >= 0.9:
+            return False
+        if aligned_duration >= (orig_duration * 0.7):
+            return False
+        if (orig_duration - aligned_duration) < 0.18:
+            return False
+        return True
+
     def release_runtime_memory(self):
         """Release backend/model objects so long-running sessions do not accumulate memory across analyses."""
         try:
@@ -669,6 +689,7 @@ class HyperTranscriptionEngine:
         use_coreml_worker = getattr(options, "use_coreml_worker", False)
         runtime_whisper_vad = {"enabled": use_whisper_vad}
         use_whisperx_align = options.use_whisperx_align
+        use_whisperx_short_fallback = getattr(options, "use_whisperx_short_fallback", False)
 
         # 소음 제거 적용
         if use_denoise:
@@ -836,7 +857,15 @@ class HyperTranscriptionEngine:
                                             new_words_data.append({"word": w_word, "start": w_start, "end": w_end})
                                             last_processed_e = w_end
                                         
-                                        new_segs.append(_CTCAlignedSeg(seg_dict, new_words_data))
+                                        aligned_seg = _CTCAlignedSeg(seg_dict, new_words_data)
+                                        if (
+                                            use_whisperx_short_fallback
+                                            and orig_seg is not None
+                                            and self._should_fallback_short_whisperx_segment(orig_seg, aligned_seg)
+                                        ):
+                                            new_segs.append(orig_seg)
+                                        else:
+                                            new_segs.append(aligned_seg)
 
                                     if len(aligned_segments) < len(segs_list):
                                         new_segs.extend(segs_list[len(aligned_segments):])
