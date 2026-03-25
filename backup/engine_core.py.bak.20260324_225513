@@ -36,18 +36,6 @@ except ImportError:
 try:
     import whisperx
     import whisperx.utils
-    try:
-        import nltk
-        _nltk_paths = [
-            os.path.join(os.getcwd(), ".venv", "nltk_data"),
-            os.path.join(os.path.dirname(__file__), ".venv", "nltk_data"),
-            os.path.join(os.path.dirname(__file__), "nltk_data"),
-        ]
-        for _p in _nltk_paths:
-            if os.path.isdir(_p) and _p not in nltk.data.path:
-                nltk.data.path.insert(0, _p)
-    except Exception:
-        pass
     HAS_WHISPERX = True
     # [시니어] WhisperX 한국어 띄어쓰기 삭제 버그 우회 (Monkey Patch)
     if hasattr(whisperx.utils, "LANGUAGES_WITHOUT_SPACES") and "ko" in whisperx.utils.LANGUAGES_WITHOUT_SPACES:
@@ -666,9 +654,34 @@ class HyperTranscriptionEngine:
         use_word_timestamps = options.use_word_timestamps
         use_whisper_vad = options.use_whisper_vad
         use_silero_vad = options.use_silero_vad
+        use_start_time_trim = getattr(options, "use_start_time_trim", False)
         use_coreml_worker = getattr(options, "use_coreml_worker", False)
         runtime_whisper_vad = {"enabled": use_whisper_vad}
         use_whisperx_align = options.use_whisperx_align
+        filler_words = {"어", "음", "아", "으", "에", "이", "오", "우", "그", "저", "뭐", "막", "좀", "그냥"}
+
+        def _trim_segment_start(segment):
+            if not isinstance(segment, TranscriptSegment) or not segment.words:
+                return segment
+            original_start = float(segment.s)
+            first_valid_start = None
+            for word in segment.words:
+                token = re.sub(r'[\s.,\-~]+', '', getattr(word, "word", ""))
+                if not token:
+                    continue
+                if token in filler_words:
+                    continue
+                try:
+                    first_valid_start = float(word.s)
+                except Exception:
+                    first_valid_start = None
+                break
+            if first_valid_start is None:
+                return segment
+            if first_valid_start - original_start > 1.5:
+                return segment
+            segment.s = max(original_start, first_valid_start)
+            return segment
 
         # 소음 제거 적용
         if use_denoise:
@@ -997,6 +1010,8 @@ class HyperTranscriptionEngine:
                                     if isinstance(r, TranscriptSegment):
                                         r.t = regen_t
                                         r.words = []
+                                        if use_start_time_trim:
+                                            r = _trim_segment_start(r)
                                     else:
                                         r['t'] = regen_t
                                         r['words'] = []
@@ -1005,6 +1020,8 @@ class HyperTranscriptionEngine:
                         
                         if isinstance(r, dict) and 'words' not in r:
                             r['words'] = []
+                        if use_start_time_trim and isinstance(r, TranscriptSegment):
+                            r = _trim_segment_start(r)
                         yield r
                 
                 gc.collect()
