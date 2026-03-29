@@ -13,6 +13,8 @@ deprecated/
 *.log
 temp_preview.srt
 temp_preview_*.ass
+temp_preview_A.ass
+temp_preview_B.ass
 refactored_temp.wav
 
 # AI Models & Large Weights

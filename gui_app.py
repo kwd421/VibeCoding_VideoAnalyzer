@@ -533,6 +533,7 @@ class CustomModelApp:
         chk_cfg = dict(bg=C['bg2'], selectcolor=C['bg3'], activebackground=C['bg2'], font=_f, relief=tk.FLAT, bd=0)
         self.remove_punctuation_var = tk.BooleanVar(value=True); tk.Checkbutton(c3, text='✂️문장부호 제거', variable=self.remove_punctuation_var, fg=C['text2'], **chk_cfg).pack(anchor=tk.W, pady=1)
         self.use_denoise_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🧪 배경음 줄이기 (실험)', variable=self.use_denoise_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
+        self.use_demucs_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🧪 배경음 분리 (Demucs 실험)', variable=self.use_demucs_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         self.use_coreml_worker_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🧪 CoreML 메모리 절약 모드 (실험)', variable=self.use_coreml_worker_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         _sep(c3)
         self.use_silero_vad_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='외부 VAD (Silero)', variable=self.use_silero_vad_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
@@ -934,6 +935,7 @@ class CustomModelApp:
         analysis_options = AnalysisSettings(
             beam_size=self.beam_size_var.get(),
             use_denoise=self.use_denoise_var.get(),
+            use_demucs=getattr(self, 'use_demucs_var', tk.BooleanVar(value=False)).get(),
             use_dominant=self.use_dominant_var.get(),
             language=self.lang_var.get().split("(")[-1].replace(")", "").strip(),
             vad_threshold=self.vad_threshold_var.get(),

@@ -148,6 +148,8 @@ class HyperTranscriptionEngine:
                 self.vision_processor.clip_processor = None
             if hasattr(self.vision_processor, "clip_model_key"):
                 self.vision_processor.clip_model_key = None
+            if hasattr(AudioProcessor, "release_cached_models"):
+                AudioProcessor.release_cached_models()
 
             import gc
             gc.collect()
@@ -161,6 +163,8 @@ class HyperTranscriptionEngine:
     def release_analysis_memory(self):
         """Drop per-analysis caches without forcing full model reload during the same run."""
         try:
+            if hasattr(AudioProcessor, "release_cached_models"):
+                AudioProcessor.release_cached_models()
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -656,6 +660,9 @@ class HyperTranscriptionEngine:
     def denoise_audio(self, audio_data):
         return AudioProcessor.denoise_audio(audio_data)
 
+    def separate_vocals_demucs(self, audio_data):
+        return AudioProcessor.separate_vocals_demucs(audio_data)
+
     def filter_dominant_speaker(self, audio_data, segments):
         return AudioProcessor.filter_dominant_speaker(audio_data, segments)
 
@@ -676,6 +683,7 @@ class HyperTranscriptionEngine:
         
         beam_size = options.beam_size
         use_denoise = options.use_denoise
+        use_demucs = getattr(options, "use_demucs", False)
         use_dominant = options.use_dominant
         selected_lang = options.language
         if selected_lang == "auto": selected_lang = None
@@ -690,6 +698,9 @@ class HyperTranscriptionEngine:
         runtime_whisper_vad = {"enabled": use_whisper_vad}
         use_whisperx_align = options.use_whisperx_align
         use_whisperx_short_fallback = getattr(options, "use_whisperx_short_fallback", False)
+
+        if use_demucs:
+            audio_data = self.separate_vocals_demucs(audio_data)
 
         # 소음 제거 적용
         if use_denoise:

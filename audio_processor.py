@@ -3,10 +3,25 @@ import subprocess
 import noisereduce as nr
 import imageio_ffmpeg
 import re
+import gc
+import torch
+import torchaudio.functional as AF
 from config_models import TranscriptSegment
+
+try:
+    from demucs.pretrained import get_model as demucs_get_model
+    from demucs.apply import apply_model as demucs_apply_model
+    HAS_DEMUCS = True
+except ImportError:
+    demucs_get_model = None
+    demucs_apply_model = None
+    HAS_DEMUCS = False
 
 class AudioProcessor:
     """[시니어 최적화] 오디오 추출 및 DSP 필터링 파이프라인 분리"""
+    _demucs_model = None
+    _demucs_model_name = None
+    _demucs_device = None
     
     @staticmethod
     def load_audio_to_memory(video_path, ffmpeg_exe=None):
@@ -130,6 +145,89 @@ class AudioProcessor:
         except Exception as e:
             print(f"Denoise Error: {e}")
             return audio_data
+
+    @classmethod
+    def _get_demucs_model(cls, model_name="htdemucs"):
+        if not HAS_DEMUCS:
+            raise RuntimeError("demucs is not installed.")
+        if cls._demucs_model is None or cls._demucs_model_name != model_name:
+            cls._demucs_model = demucs_get_model(model_name)
+            cls._demucs_model_name = model_name
+        return cls._demucs_model
+
+    @staticmethod
+    def _get_demucs_device():
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return torch.device("mps")
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        return torch.device("cpu")
+
+    @classmethod
+    def separate_vocals_demucs(cls, audio_data, sample_rate=16000, model_name="htdemucs"):
+        """Experimental source separation using Demucs. Returns mono vocals at the original sample rate."""
+        try:
+            sample_count = len(audio_data)
+            if sample_count < sample_rate:
+                return audio_data
+
+            model = cls._get_demucs_model(model_name)
+            target_sr = int(getattr(model, "samplerate", 44100))
+            target_ch = int(getattr(model, "audio_channels", 2))
+            sources = list(getattr(model, "sources", []))
+            if "vocals" not in sources:
+                raise RuntimeError(f"Demucs model '{model_name}' does not expose vocals source: {sources}")
+            vocals_idx = sources.index("vocals")
+            device = cls._get_demucs_device()
+            cls._demucs_device = device.type
+
+            wav = torch.from_numpy(np.asarray(audio_data, dtype=np.float32)).unsqueeze(0)
+            if sample_rate != target_sr:
+                wav = AF.resample(wav, sample_rate, target_sr)
+            if target_ch == 2:
+                wav = wav.repeat(2, 1)
+            elif target_ch != 1:
+                wav = wav.repeat(target_ch, 1)
+            wav = wav.unsqueeze(0)
+
+            with torch.no_grad():
+                separated = demucs_apply_model(
+                    model,
+                    wav,
+                    device=device,
+                    shifts=1,
+                    split=True,
+                    overlap=0.1,
+                    progress=False,
+                    num_workers=0,
+                )
+
+            vocals = separated[0, vocals_idx]
+            if vocals.dim() == 2:
+                vocals = vocals.mean(dim=0, keepdim=True)
+            if target_sr != sample_rate:
+                vocals = AF.resample(vocals, target_sr, sample_rate)
+            vocals = vocals.squeeze(0).cpu().numpy().astype(np.float32, copy=False)
+            return vocals
+        except Exception as e:
+            print(f"Demucs Error: {e}")
+            return audio_data
+        finally:
+            gc.collect()
+
+    @classmethod
+    def release_cached_models(cls):
+        try:
+            cls._demucs_model = None
+            cls._demucs_model_name = None
+            cls._demucs_device = None
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                torch.mps.empty_cache()
+        except Exception:
+            pass
 
     @staticmethod
     def filter_dominant_speaker(audio_data, segments):

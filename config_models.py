@@ -7,6 +7,7 @@ class AnalysisSettings:
     device_mode: str = "auto"
     beam_size: int = 5
     use_denoise: bool = False
+    use_demucs: bool = False
     use_dominant: bool = False
     language: Optional[str] = "ko"
     vad_threshold: float = 0.35
