@@ -32,6 +32,55 @@ class UIBlockEditor:
         """항상 최신 VLC player 인스턴스를 동적으로 반환"""
         return self._player_getter()
 
+    @staticmethod
+    def has_option_modifier(event):
+        state = getattr(event, "state", 0)
+        return bool(state & 0x8 or state & 0x10)
+
+    def _handle_initial_inline_keypress(self, entry, placeholder, event):
+        if not entry.winfo_exists():
+            return None
+        if not getattr(entry, '_replace_on_first_input', False):
+            return None
+
+        def _hide_placeholder(clear_text=False):
+            if not getattr(entry, '_placeholder_active', False):
+                return
+            if clear_text:
+                entry.delete(0, tk.END)
+                entry.icursor(0)
+            try:
+                placeholder.place_forget()
+            except tk.TclError:
+                pass
+            entry._placeholder_active = False
+
+        skip = {
+            'Return', 'KP_Enter', 'Escape', 'Shift_L', 'Shift_R', 'Control_L', 'Control_R',
+            'Alt_L', 'Alt_R', 'Meta_L', 'Meta_R', 'Command', 'Caps_Lock',
+        }
+        navigation = {'Left', 'Right', 'Up', 'Down', 'Home', 'End', 'Prior', 'Next'}
+        if event.keysym in skip:
+            return None
+        if event.keysym in navigation:
+            _hide_placeholder(clear_text=False)
+            if not entry.get():
+                entry.insert(0, getattr(entry, '_original_text', ''))
+                entry.icursor(tk.END)
+            entry._replace_on_first_input = False
+            return None
+        if event.state & 0x4:
+            _hide_placeholder(clear_text=False)
+            entry._replace_on_first_input = False
+            return None
+        if event.keysym in {'BackSpace', 'Delete'} or getattr(event, 'char', ''):
+            _hide_placeholder(clear_text=True)
+            entry._replace_on_first_input = False
+            return None
+        _hide_placeholder(clear_text=False)
+        entry._replace_on_first_input = False
+        return None
+
     def __init__(self, parent, root, transcript_manager, player_getter, on_tree_rebuild_request):
         self.parent = parent
         self.root = root
@@ -72,20 +121,80 @@ class UIBlockEditor:
             
         self.parent.bind("<Enter>", _on_enter)
         self.parent.bind("<Leave>", _on_leave)
-        self.block_canvas.bind("<Button-3>", self.on_block_right_click)
+        for sequence in ("<Button-3>", "<Button-2>", "<Control-Button-1>"):
+            self.block_canvas.bind(sequence, self.on_block_right_click)
 
         self.block_menu = tk.Menu(self.root, tearoff=0, bg='#2c2c2e', fg='#f5f5f7', activebackground='#0a84ff', activeforeground='white', font=('Segoe UI', 12))
-        self.block_menu.add_command(label="분리: 현재 단어부터 다음 줄로 나누기", command=self.split_word_block)
+        self.block_menu.add_command(label="현재 단어부터 다음줄로 내리기", command=self.split_word_block)
+        self.block_menu.add_command(label="단어 삭제", command=self.delete_word_block)
         
         self.row_menu = tk.Menu(self.root, tearoff=0, bg='#2c2c2e', fg='#f5f5f7', activebackground='#0a84ff', activeforeground='white', font=('Segoe UI', 12))
         self.row_menu.add_command(label="병합: 위 대사와 합치기", command=lambda: self.merge_row_block(-1))
         self.row_menu.add_command(label="병합: 아래 대사와 합치기", command=lambda: self.merge_row_block(1))
 
-        self.drag_data = {"items": [], "idx": -1, "w_idx": -1, "start_x": 0, "start_y": 0}
+        self.drag_data = {"items": [], "idx": -1, "w_idx": -1, "start_x": 0, "start_y": 0, "time_cell": None}
         self.row_y_map = []
         self.action_data = {}
         self.active_entry = None  # [사용자 요청] 현재 활성화된 편집창 추적
         self.active_entry_save_cb = None  # 강제 저장을 위한 콜백 저장
+        self.active_entry_frame = None
+
+    def _apply_time_delta(self, results_data, idx, key, delta, link_adjacent=False):
+        if not (0 <= idx < len(results_data)):
+            return None
+
+        if link_adjacent and key == 'e' and idx < len(results_data) - 1:
+            nv = max(0, results_data[idx]['e'] + delta)
+            if nv <= results_data[idx]['s'] or nv >= results_data[idx + 1]['e']:
+                return None
+            self.transcript_manager.save_state()
+            results_data[idx]['e'] = round(nv, 3)
+            results_data[idx]['_manual_end_timing'] = True
+            results_data[idx + 1]['s'] = round(nv, 3)
+            results_data[idx + 1]['_manual_start_timing'] = True
+            if results_data[idx].get('words'):
+                results_data[idx]['words'][-1]['e'] = nv
+            if results_data[idx + 1].get('words'):
+                results_data[idx + 1]['words'][0]['s'] = nv
+            return {"time": nv, "updated": [idx, idx + 1]}
+
+        if link_adjacent and key == 's' and idx > 0:
+            nv = max(0, results_data[idx]['s'] + delta)
+            if nv <= results_data[idx - 1]['s'] or nv >= results_data[idx]['e']:
+                return None
+            self.transcript_manager.save_state()
+            results_data[idx]['s'] = round(nv, 3)
+            results_data[idx]['_manual_start_timing'] = True
+            results_data[idx - 1]['e'] = round(nv, 3)
+            results_data[idx - 1]['_manual_end_timing'] = True
+            if results_data[idx].get('words'):
+                results_data[idx]['words'][0]['s'] = nv
+            if results_data[idx - 1].get('words'):
+                results_data[idx - 1]['words'][-1]['e'] = nv
+            return {"time": nv, "updated": [idx - 1, idx]}
+
+        nv = max(0, results_data[idx][key] + delta)
+        valid = True
+        if key == 's':
+            if nv >= results_data[idx]['e'] or (idx > 0 and nv < results_data[idx-1]['e']):
+                valid = False
+        else:
+            if nv <= results_data[idx]['s'] or (idx < len(results_data)-1 and nv > results_data[idx+1]['s']):
+                valid = False
+        if not valid:
+            return None
+        self.transcript_manager.save_state()
+        results_data[idx][key] = round(nv, 3)
+        if key == 's':
+            results_data[idx]['_manual_start_timing'] = True
+        else:
+            results_data[idx]['_manual_end_timing'] = True
+        if results_data[idx].get('words'):
+            if key == 's':
+                results_data[idx]['words'][0]['s'] = nv
+            else:
+                results_data[idx]['words'][-1]['e'] = nv
+        return {"time": nv, "updated": [idx]}
 
     def on_block_scroll(self, event):
         if not self.is_vertical_scroll_event(event):
@@ -94,6 +203,7 @@ class UIBlockEditor:
         if event.state & 0x4: # Ctrl key
             # [시니어 수정] 캔버스 좌표 점검 (스크롤 대응)
             cx, cy = self.block_canvas.canvasx(event.x), self.block_canvas.canvasy(event.y)
+            time_idx, time_key = self._resolve_time_cell(cx, cy)
             item = self.block_canvas.find_closest(cx, cy)
             if not item: return "break"
             tags = self.block_canvas.gettags(item[0])
@@ -105,11 +215,12 @@ class UIBlockEditor:
             # 3. 행 전체 태그 감지
             row_tag = next((t for t in tags if t.startswith("row_")), None)
             
-            if word_tag or time_tag or row_tag:
+            if word_tag or time_tag or row_tag or time_idx is not None:
                 try:
                     delta = -0.05 if event.delta > 0 else 0.05
                     results_data = self.transcript_manager.get_all()
-                    
+                    link_adjacent = self.has_option_modifier(event)
+
                     if word_tag:
                         # --- 개별 단어 조절 (알고리즘 리스트뷰와 통합) ---
                         idx, w_idx = map(int, word_tag.split("_"))
@@ -138,25 +249,11 @@ class UIBlockEditor:
                             results_data[idx]['e'] = max(w['e'] for w in results_data[idx]['words'])
                             self._sync_and_play(nv, fast=True, idx_to_update=idx)
                     
-                    elif time_tag:
+                    elif time_idx is not None:
                         # --- 시작/종료 시간 조절 (리스트뷰와 100% 동일) ---
-                        parts = time_tag.split("_")
-                        key, idx = parts[1], int(parts[2])
-                        nv = max(0, results_data[idx][key] + delta)
-                        valid = True
-                        if key == 's':
-                            if nv >= results_data[idx]['e'] or (idx > 0 and nv < results_data[idx-1]['e']): valid = False
-                        else: # key == 'e'
-                            if nv <= results_data[idx]['s'] or (idx < len(results_data)-1 and nv > results_data[idx+1]['s']): valid = False
-                        
-                        if valid:
-                            self.transcript_manager.save_state()
-                            results_data[idx][key] = round(nv, 3)
-                            # 리전 조절 시 내부 단어도 강제 싱크
-                            if results_data[idx].get('words'):
-                                if key == 's': results_data[idx]['words'][0]['s'] = nv
-                                else: results_data[idx]['words'][-1]['e'] = nv
-                            self._sync_and_play(nv, fast=True, idx_to_update=idx)
+                        change = self._apply_time_delta(results_data, time_idx, time_key, delta, link_adjacent=link_adjacent)
+                        if change:
+                            self._sync_and_play(change["time"], fast=True, idxs_to_update=change["updated"])
                     
                     elif row_tag:
                         # --- 행 배경 조절 ---
@@ -171,6 +268,10 @@ class UIBlockEditor:
                         if valid:
                             self.transcript_manager.save_state()
                             results_data[idx][key] = round(nv, 3)
+                            if key == 's':
+                                results_data[idx]['_manual_start_timing'] = True
+                            else:
+                                results_data[idx]['_manual_end_timing'] = True
                             if results_data[idx].get('words'):
                                 if key == 's': results_data[idx]['words'][0]['s'] = nv
                                 else: results_data[idx]['words'][-1]['e'] = nv
@@ -202,18 +303,36 @@ class UIBlockEditor:
         
         x1, y1, x2, y2 = bbox
         
+        editor_frame = tk.Frame(self.block_canvas, bg='#FFFFFF', highlightthickness=1, highlightbackground='#007AFF')
         # Entry 위젯 생성 (폰트 크기 13pt로 상향)
-        entry = tk.Entry(self.block_canvas, font=("Noto Sans KR", 13), justify=tk.CENTER, bd=0, highlightthickness=1, highlightbackground='#007AFF')
-        entry.insert(0, current_text)
-        
+        entry = tk.Entry(editor_frame, font=("Noto Sans KR", 13), justify=tk.CENTER, bd=0, highlightthickness=0, relief=tk.FLAT)
+        entry.place(relx=0, rely=0, relwidth=1, relheight=1)
+        placeholder = tk.Label(editor_frame, text=current_text, font=("Noto Sans KR", 13), justify=tk.CENTER, bg='#0A84FF', fg='white')
+        placeholder.place(relx=0, rely=0, relwidth=1, relheight=1)
+
         # [사용자 요청] 스크롤 시 위치가 어긋나지 않도록 canvas.create_window 사용
-        self.block_canvas.create_window(x1-2, y1-2, window=entry, width=(x2-x1)+4, height=(y2-y1)+4, anchor='nw', tag="editing_entry")
-        entry.focus_set()
-        entry.selection_range(0, tk.END)
+        self.block_canvas.create_window(x1-2, y1-2, window=editor_frame, width=(x2-x1)+4, height=(y2-y1)+4, anchor='nw', tag="editing_entry")
+        def _claim_focus():
+            if not entry.winfo_exists():
+                return
+            try:
+                entry.focus_force()
+            except tk.TclError:
+                return
+            entry.select_clear()
+            entry.icursor(0)
+        self.root.after_idle(_claim_focus)
+        entry._replace_on_first_input = True
+        entry._placeholder_active = True
+        entry._placeholder_widget = placeholder
+        entry._original_text = current_text
 
         import tkinter.font as tkfont
         _fnt = tkfont.Font(font=("Noto Sans KR", 13))
-        
+
+        def _maybe_replace_initial_text(event):
+            return self._handle_initial_inline_keypress(entry, placeholder, event)
+
         def _resize_entry(event=None):
             if not entry.winfo_exists(): return
             txt = entry.get()
@@ -236,6 +355,8 @@ class UIBlockEditor:
         def _save(*_):
             if not entry.winfo_exists(): return
             new_val = entry.get().strip()
+            if getattr(entry, '_placeholder_active', False) and not new_val:
+                new_val = current_text
             # 중복 실행 방지를 위해 콜백 먼저 제거
             self.active_entry_save_cb = None
             
@@ -248,21 +369,58 @@ class UIBlockEditor:
             else:
                 self.render_block_view()
             
-            if entry.winfo_exists():
-                entry.destroy()
+            if editor_frame.winfo_exists():
+                editor_frame.destroy()
             self.active_entry = None
+            self.active_entry_frame = None
+            return "break"
+
+        def _save_after_return(*_):
+            if not entry.winfo_exists():
+                return "break"
+            self.root.after_idle(_save)
+            return "break"
+
+        def _cancel(*_):
+            self.active_entry_save_cb = None
+            self.active_entry = None
+            self.active_entry_frame = None
+            if editor_frame.winfo_exists():
+                editor_frame.destroy()
+            self.render_block_view()
+            return "break"
 
         self.active_entry = entry
+        self.active_entry_frame = editor_frame
         self.active_entry_save_cb = _save
-            
-        entry.bind("<Return>", _save)
-        entry.bind("<FocusOut>", _save)
-        entry.bind("<Escape>", lambda e: [entry.destroy(), self.render_block_view()])
 
-    def _sync_and_play(self, time_val, fast=False, idx_to_update=None):
-        if fast and idx_to_update is not None:
+        entry.bind("<KeyPress>", _maybe_replace_initial_text, add="+")
+        entry.bind("<KeyRelease-Return>", _save_after_return)
+        entry.bind("<KeyRelease-KP_Enter>", _save_after_return)
+        entry.bind("<FocusOut>", _save)
+        entry.bind("<Escape>", _cancel)
+        def _on_placeholder_click(_event):
+            try:
+                entry.focus_force()
+            except tk.TclError:
+                return "break"
+            try:
+                placeholder.place_forget()
+            except tk.TclError:
+                return "break"
+            entry._placeholder_active = False
+            return "break"
+
+        placeholder.bind("<Button-1>", _on_placeholder_click)
+
+    def _sync_and_play(self, time_val, fast=False, idx_to_update=None, idxs_to_update=None):
+        if fast and (idx_to_update is not None or idxs_to_update):
             # [시니어 최적화] 전체 리빌드를 건너뛰고 캔버스 라벨만 즉시 수정 (렉 방지)
-            self._update_canvas_times_live(idx_to_update)
+            targets = list(idxs_to_update or [])
+            if idx_to_update is not None and idx_to_update not in targets:
+                targets.append(idx_to_update)
+            for target_idx in targets:
+                self._update_canvas_times_live(target_idx)
             self.rebuild_tree_and_render(fast=True)
         else:
             self.rebuild_tree_and_render(fast=False)
@@ -286,6 +444,16 @@ class UIBlockEditor:
         e_tag = f"time_e_{idx}"
         items_e = self.block_canvas.find_withtag(e_tag)
         if items_e: self.block_canvas.itemconfig(items_e[0], text=self.format_time(r['e']))
+
+    def _resolve_time_cell(self, x, y):
+        for rmap in self.row_y_map:
+            if rmap['y_start'] <= y <= rmap['y_end']:
+                if 45 <= x < 140:
+                    return rmap['idx'], 's'
+                if 140 <= x < 235:
+                    return rmap['idx'], 'e'
+                break
+        return None, None
 
     def set_active_row(self, idx, follow=False):
         """현재 재생 중인 행의 번호를 설정하고 배경색을 즉시 갱신"""
@@ -383,7 +551,13 @@ class UIBlockEditor:
 
     def on_block_right_click(self, event):
         x, y = self.block_canvas.canvasx(event.x), self.block_canvas.canvasy(event.y)
-        item = self.block_canvas.find_withtag("current")
+        item = self.block_canvas.find_overlapping(x, y, x, y)
+        if item:
+            item = (item[-1],)
+        else:
+            item = self.block_canvas.find_withtag("current")
+        if not item:
+            item = self.block_canvas.find_closest(x, y)
         if not item: return
         tags = self.block_canvas.gettags(item[0])
         
@@ -392,7 +566,9 @@ class UIBlockEditor:
             try:
                 idx, w_idx = map(int, word_tag.split("_"))
                 self.action_data = {"idx": idx, "w_idx": w_idx}
-                self.block_menu.post(event.x_root, event.y_root)
+                self.block_menu.tk_popup(event.x_root, event.y_root)
+                self.block_menu.grab_release()
+                return "break"
             except: pass
         else:
             time_tag = next((t for t in tags if str(t).startswith("time_")), None)
@@ -401,13 +577,17 @@ class UIBlockEditor:
                 try:
                     idx = int(time_tag.split("_")[2])
                     self.action_data = {"idx": idx}
-                    self.row_menu.post(event.x_root, event.y_root)
+                    self.row_menu.tk_popup(event.x_root, event.y_root)
+                    self.row_menu.grab_release()
+                    return "break"
                 except: pass
             elif row_tag:
                 try:
                     idx = int(row_tag.split("_")[1])
                     self.action_data = {"idx": idx}
-                    self.row_menu.post(event.x_root, event.y_root)
+                    self.row_menu.tk_popup(event.x_root, event.y_root)
+                    self.row_menu.grab_release()
+                    return "break"
                 except: pass
 
     def on_block_delete(self, event):
@@ -588,18 +768,10 @@ class UIBlockEditor:
             # 행 번호
             self.block_canvas.create_text(26, y_offset + 19, text=f"{idx+1}", fill='#000000', anchor=tk.CENTER, font=("Noto Sans KR", 12))
             
-            def _jump(e, t):
-                if self.player:
-                    self.player.set_time(int(t * 1000))
-                    self.player.play()
-
-            # [사용자 요청 1,2] 시작 시간 — 클릭 시 점프 + time_s 태그로 Ctrl+휠 감지
-            start_txt = self.block_canvas.create_text(92, y_offset + 19, text=self.format_time(r.get('s',0)), fill='#000000', anchor=tk.CENTER, font=("Noto Sans KR", 13), tags=(f"time_s_{idx}",))
-            self.block_canvas.tag_bind(start_txt, "<Button-1>", lambda e, s=r.get('s',0): _jump(e, s))
+            # [사용자 요청 1,2] 시작/종료 시간 — 셀 전체 클릭과 동일한 공통 경로로 처리
+            self.block_canvas.create_text(92, y_offset + 19, text=self.format_time(r.get('s',0)), fill='#000000', anchor=tk.CENTER, font=("Noto Sans KR", 13), tags=(f"time_s_{idx}",))
             
-            # [사용자 요청 1,2] 종료 시간 — 클릭 시 점프 + time_e 태그로 Ctrl+휠 감지
-            end_txt = self.block_canvas.create_text(187, y_offset + 19, text=self.format_time(r.get('e',0)), fill='#000000', anchor=tk.CENTER, font=("Noto Sans KR", 13), tags=(f"time_e_{idx}",))
-            self.block_canvas.tag_bind(end_txt, "<Button-1>", lambda e, s=r.get('e',0): _jump(e, s))
+            self.block_canvas.create_text(187, y_offset + 19, text=self.format_time(r.get('e',0)), fill='#000000', anchor=tk.CENTER, font=("Noto Sans KR", 13), tags=(f"time_e_{idx}",))
 
             # 컬럼 구분선
             self.block_canvas.create_line(45, y_offset + 6, 45, y_offset + 32, fill='#D1D1D6', width=1)
@@ -678,6 +850,17 @@ class UIBlockEditor:
             self.active_entry_save_cb()
 
         x, y = self.block_canvas.canvasx(event.x), self.block_canvas.canvasy(event.y)
+        time_idx, time_key = self._resolve_time_cell(x, y)
+        self.drag_data = {
+            "items": [],
+            "idx": -1,
+            "w_idx": -1,
+            "start_x": x,
+            "start_y": y,
+            "press_raw_x": event.x,
+            "press_raw_y": event.y,
+            "time_cell": (time_idx, time_key) if time_idx is not None else None,
+        }
         item = self.block_canvas.find_withtag("current")
         if not item: return
         tags = self.block_canvas.gettags(item[0])
@@ -688,10 +871,6 @@ class UIBlockEditor:
             idx_str, w_idx_str = word_tag.split("_")
             self.drag_data["idx"] = int(idx_str)
             self.drag_data["w_idx"] = int(w_idx_str)
-            self.drag_data["start_x"] = x
-            self.drag_data["start_y"] = y
-            self.drag_data["press_raw_x"] = event.x
-            self.drag_data["press_raw_y"] = event.y
             
             items = self.block_canvas.find_withtag(word_tag)
             self.drag_data["items"] = items
@@ -789,17 +968,31 @@ class UIBlockEditor:
                     self.block_canvas.tag_raise(it)
 
     def on_block_release(self, event):
-        if not getattr(self, 'drag_data', {}).get("items"): return
+        if not getattr(self, 'drag_data', {}):
+            return
         y = self.block_canvas.canvasy(event.y)
         s_idx = self.drag_data["idx"]
         w_idx = self.drag_data["w_idx"]
         
         # 클릭과 드래그 구분 (이동 5px 미만 → 편집 모드)
         dist = ((event.x - self.drag_data.get("press_raw_x", 0))**2 + (event.y - self.drag_data.get("press_raw_y", 0))**2)**0.5
+        if dist < 5 and self.drag_data.get("time_cell"):
+            idx, key = self.drag_data["time_cell"]
+            if idx is not None:
+                results_data = self.transcript_manager.get_all()
+                if 0 <= idx < len(results_data) and self.player:
+                    self.player.set_time(int(results_data[idx].get(key, 0) * 1000))
+                    self.player.play()
+            self.block_canvas.delete("drop_highlight")
+            self.drag_data = {"items": [], "idx": -1, "w_idx": -1, "start_x": 0, "start_y": 0, "time_cell": None}
+            return "break"
+        if not getattr(self, 'drag_data', {}).get("items"):
+            self.drag_data = {"items": [], "idx": -1, "w_idx": -1, "start_x": 0, "start_y": 0, "time_cell": None}
+            return
         if dist < 5:
             self.block_canvas.delete("drop_highlight")
             self._edit_word_inline(s_idx, w_idx)
-            self.drag_data = {"items": []}
+            self.drag_data = {"items": [], "idx": -1, "w_idx": -1, "start_x": 0, "start_y": 0, "time_cell": None}
             return
 
         # 드롭 대상 탐색
@@ -849,7 +1042,7 @@ class UIBlockEditor:
                 
             if not is_valid:
                 self.block_canvas.delete("drop_highlight")
-                self.drag_data = {"items": []}
+                self.drag_data = {"items": [], "idx": -1, "w_idx": -1, "start_x": 0, "start_y": 0, "time_cell": None}
                 self.render_block_view()
                 return
             else:
@@ -889,11 +1082,18 @@ class UIBlockEditor:
                 self.rebuild_tree_and_render()
         
         self.block_canvas.delete("drop_highlight")
-        self.drag_data = {"items": []}
+        self.drag_data = {"items": [], "idx": -1, "w_idx": -1, "start_x": 0, "start_y": 0, "time_cell": None}
         self.render_block_view()
         
     def on_block_double(self, event):
+        x = self.block_canvas.canvasx(event.x)
         y = self.block_canvas.canvasy(event.y)
+        idx, key = self._resolve_time_cell(x, y)
+        if idx is not None:
+            results_data = self.transcript_manager.get_all()
+            if 0 <= idx < len(results_data) and self.player:
+                self.player.set_time(int(results_data[idx].get(key, 0) * 1000))
+            return "break"
         for rmap in self.row_y_map:
             if rmap['y_start'] <= y <= rmap['y_end']:
                 results_data = self.transcript_manager.get_all()

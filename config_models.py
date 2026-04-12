@@ -13,11 +13,12 @@ class AnalysisSettings:
     vad_threshold: float = 0.35
     min_silence_ms: int = 2000
     speech_pad_ms: int = 250
-    use_word_timestamps: bool = True
+    use_word_timestamps: bool = False
     use_whisper_vad: bool = False
     use_silero_vad: bool = False
     use_whisperx_align: bool = False  # WhisperX forced alignment 사용 여부
     use_whisperx_short_fallback: bool = False  # 짧은 발화에서 과도한 축약 시 원본 타이밍 유지
+    use_gemma4_mlx_filter: bool = False  # Gemma 4 E4B MLX로 이상 세그먼트 제거
     remove_punctuation: bool = False
     use_coreml_worker: bool = False
 

@@ -72,7 +72,7 @@ class TranscriptManager:
         if len(chunks) > 1:
             last = chunks[-1]
             prev = chunks[-2]
-            if len(last.replace(" ", "")) < max(3, int(max_chars * 0.4)) and len(prev) + len(last) + 1 <= max_chars * 1.5:
+            if len(last.replace(" ", "")) < max(3, int(max_chars * 0.4)) and len(prev) + len(last) + 1 <= max_chars:
                 chunks[-2] = prev + " " + last
                 chunks.pop()
                 
@@ -81,9 +81,28 @@ class TranscriptManager:
     def add_segment(self, r: dict, ui_callback: Callable[[dict], None]):
         """타임라인 겹침 방어 등의 전처리 후 결과 데이터 삽입"""
         if self.results_data:
-            last_e = self.results_data[-1]['e']
-            if r['e'] <= last_e: return 
-            if r['s'] < last_e: r['s'] = last_e + 0.01 
+            prev = self.results_data[-1]
+            last_e = prev['e']
+            if r['e'] <= last_e:
+                return
+            if r['s'] <= last_e:
+                new_prev_e = round(max(prev['s'], r['s'] - 0.01), 3)
+                if new_prev_e != prev['e']:
+                    prev['e'] = new_prev_e
+                    words = prev.get('words', [])
+                    if words:
+                        last_word = words[-1]
+                        if last_word['e'] > new_prev_e:
+                            last_word['e'] = max(last_word['s'], new_prev_e)
+                    if prev['t'].endswith('s') and ' ' not in prev['t'] and '[' not in prev['t']:
+                        prev['t'] = f"{(prev['e'] - prev['s']):.2f}s"
+                    ui_callback({
+                        "action": "update_row",
+                        "i": len(self.results_data),
+                        "s": prev['s'],
+                        "e": prev['e'],
+                        "t": prev['t'],
+                    })
             
         if r['t'].endswith('s') and ' ' not in r['t'] and '[' not in r['t']:
             r['t'] = f"{(r['e'] - r['s']):.2f}s"

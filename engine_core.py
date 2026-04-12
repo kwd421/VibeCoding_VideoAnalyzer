@@ -56,7 +56,6 @@ except ImportError:
     HAS_WHISPERX = False
     print("[WARN] WhisperX module not found. Forced alignment feature is disabled.")
 
-
 @dataclass
 class RuntimeWord:
     word: str
@@ -108,6 +107,10 @@ class HyperTranscriptionEngine:
         self.cpu_cores = max(1, int(total_cores * 0.5))
         self.device_info = "auto"
         self.align_models_cache = {}    # [캐싱] (언어, 디바이스)별 WhisperX 정렬 모델
+        self.gemma4_mlx_model = None
+        self.gemma4_mlx_processor = None
+        self.gemma4_mlx_model_id = None
+        self.gemma4_mlx_warned = False
 
     @staticmethod
     def _should_fallback_short_whisperx_segment(orig_seg, aligned_seg):
@@ -129,6 +132,116 @@ class HyperTranscriptionEngine:
             return False
         return True
 
+    @staticmethod
+    def _should_review_with_gemma4_text(text):
+        if not text:
+            return False
+        text = str(text).strip()
+        if len(text) < 2:
+            return True
+
+        tokens = [tok for tok in re.split(r"\s+", text) if tok]
+        if len(tokens) >= 3 and len(set(tokens)) == 1:
+            return True
+
+        normalized = re.sub(r"[\s\W_]+", "", text)
+        if len(normalized) < 2:
+            return True
+
+        if len(normalized) >= 6:
+            half = len(normalized) // 2
+            if half > 0 and normalized[:half] == normalized[half:half * 2]:
+                return True
+
+        if re.search(r"(.)\1{5,}", normalized):
+            return True
+
+        if re.search(r"(.{2,12})\s+\1(\s+\1)+", text):
+            return True
+
+        return False
+
+    def _get_gemma4_mlx_model_id(self):
+        return os.environ.get("MLX_GEMMA4_MODEL", "mlx-community/gemma-4-e4b-it-8bit")
+
+    def _ensure_gemma4_mlx_runtime(self):
+        model_id = self._get_gemma4_mlx_model_id()
+        if (
+            self.gemma4_mlx_model is not None
+            and self.gemma4_mlx_processor is not None
+            and self.gemma4_mlx_model_id == model_id
+        ):
+            return self.gemma4_mlx_model, self.gemma4_mlx_processor
+
+        try:
+            from mlx_vlm import load
+        except Exception as e:
+            if not self.gemma4_mlx_warned:
+                print(f"[WARN] Gemma 4 MLX runtime unavailable: {e}")
+                self.gemma4_mlx_warned = True
+            return None, None
+
+        try:
+            model, processor = load(model_id)
+            self.gemma4_mlx_model = model
+            self.gemma4_mlx_processor = processor
+            self.gemma4_mlx_model_id = model_id
+            return model, processor
+        except Exception as e:
+            if not self.gemma4_mlx_warned:
+                print(f"[WARN] Gemma 4 MLX model load failed ({model_id}): {e}")
+                self.gemma4_mlx_warned = True
+            return None, None
+
+    def _review_with_gemma4_mlx(self, text):
+        model, processor = self._ensure_gemma4_mlx_runtime()
+        if model is None or processor is None:
+            return None
+
+        prompt = processor.apply_chat_template(
+            [{
+                "role": "user",
+                "content": (
+                    "다음 한국어 자막 세그먼트가 정상 대사인지 판정해. "
+                    "짧거나 구어체라도 정상 대사면 KEEP. "
+                    "반복 환각, 의미 없는 잡음, 명백한 가비지면 DROP. "
+                    "KEEP 또는 DROP만 답해.\n"
+                    f"세그먼트: {text}"
+                ),
+            }],
+            add_generation_prompt=True,
+        )
+
+        try:
+            from mlx_vlm import generate
+            result = generate(model, processor, prompt=prompt, verbose=False, max_tokens=8)
+            output = (getattr(result, "text", "") or "").strip().upper()
+            clean = re.sub(r"[^A-Z]", "", output)
+            if "DROP" in clean:
+                return False
+            if "KEEP" in clean:
+                return True
+        except Exception as e:
+            if not self.gemma4_mlx_warned:
+                print(f"[WARN] Gemma 4 MLX inference failed: {e}")
+                self.gemma4_mlx_warned = True
+        return None
+
+    def _filter_segments_with_gemma4_mlx(self, segs_list):
+        filtered = []
+        for seg in segs_list:
+            text = getattr(seg, "text", "") or ""
+            if not self._should_review_with_gemma4_text(text):
+                filtered.append(seg)
+                continue
+
+            verdict = self._review_with_gemma4_mlx(text)
+            if verdict is False:
+                print(f"[INFO] Gemma 4 MLX filter dropped suspicious segment: {text[:80]}")
+                continue
+            filtered.append(seg)
+        return filtered
+
     def release_runtime_memory(self):
         """Release backend/model objects so long-running sessions do not accumulate memory across analyses."""
         try:
@@ -141,6 +254,10 @@ class HyperTranscriptionEngine:
             self.vad_device_info = None
             self.align_models_cache.clear()
             self.mps_segment_fallback_warned = False
+            self.gemma4_mlx_model = None
+            self.gemma4_mlx_processor = None
+            self.gemma4_mlx_model_id = None
+            self.gemma4_mlx_warned = False
 
             if hasattr(self.vision_processor, "clip_model"):
                 self.vision_processor.clip_model = None
@@ -698,6 +815,8 @@ class HyperTranscriptionEngine:
         runtime_whisper_vad = {"enabled": use_whisper_vad}
         use_whisperx_align = options.use_whisperx_align
         use_whisperx_short_fallback = getattr(options, "use_whisperx_short_fallback", False)
+        use_gemma4_mlx_filter = getattr(options, "use_gemma4_mlx_filter", False)
+        use_word_timestamps = use_word_timestamps or use_whisperx_align or use_whisperx_short_fallback
 
         if use_demucs:
             audio_data = self.separate_vocals_demucs(audio_data)
@@ -886,6 +1005,9 @@ class HyperTranscriptionEngine:
                                     
                             except Exception as e:
                                 print(f"[WARN] WhisperX alignment 전체 실패, 기존 결과 유지: {e}")
+
+                        if use_gemma4_mlx_filter and segs_list:
+                            segs_list = self._filter_segments_with_gemma4_mlx(segs_list)
                         
                         sub_max_time = vad_e - vad_s
                         offset_vad = offset + vad_s
@@ -1042,7 +1164,7 @@ class HyperTranscriptionEngine:
                                         r['words'] = []
                                     yield r
                             continue # 재생성도 실패하거나 못 살리면 최종적으로 버림 (Drop)
-                        
+
                         if isinstance(r, dict) and 'words' not in r:
                             r['words'] = []
                         yield r

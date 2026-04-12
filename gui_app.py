@@ -110,6 +110,24 @@ class CustomModelApp:
             cb(percent, message)
         except Exception:
             pass
+
+    def _get_subtitle_entries_no_overlap(self, use_display_start=False):
+        entries = []
+        src = list(self.results_data)
+
+        def _get_display_start(r):
+            return r['s']
+
+        for r in src:
+            s_r = _get_display_start(r) if use_display_start else r['s']
+            entries.append({"s": float(s_r), "e": float(r['e']), "t": r['t'], "raw": r})
+
+        for i in range(len(entries) - 1):
+            next_start = entries[i + 1]["s"]
+            if entries[i]["e"] >= next_start:
+                entries[i]["e"] = round(max(entries[i]["s"], next_start - 0.01), 3)
+
+        return entries
     def __init__(self, root, startup_progress=None):
         self.root = root
         self._startup_progress_cb = startup_progress
@@ -135,6 +153,13 @@ class CustomModelApp:
             'teal':     '#5AC8FA',  # System Teal
         }
         C = self.C
+
+        # 드롭다운 팝업이 시스템 기본색을 타더라도 흰 배경에서는 검은 글자 유지
+        self.root.option_add('*TCombobox*Listbox.background', C['bg2'])
+        self.root.option_add('*TCombobox*Listbox.foreground', C['text'])
+        self.root.option_add('*TCombobox*Listbox.selectBackground', C['accent'])
+        self.root.option_add('*TCombobox*Listbox.selectForeground', '#FFFFFF')
+        self.root.option_add('*TCombobox*Listbox.font', 'Noto Sans KR 10')
         
         # [Apple HIG] ttk 스타일 테마
         style = ttk.Style()
@@ -262,6 +287,7 @@ class CustomModelApp:
     def bind_events(self):
         self.dispatcher.on("progress", lambda x: self._queue_ui(lambda: self._on_progress(x)))
         self.dispatcher.on("add_row", lambda x: self._queue_ui(lambda: self._on_add_row(x)))
+        self.dispatcher.on("update_row", lambda x: self._queue_ui(lambda: self._on_update_row(x)))
         self.dispatcher.on("complete", lambda x: self._queue_ui(lambda: self._on_complete(x)))
         self.dispatcher.on("message", lambda x: self._queue_ui(lambda: messagebox.showinfo("Done", x["text"])))
         self.dispatcher.on("error", lambda x: self._queue_ui(lambda: self._on_error(x)))
@@ -306,6 +332,17 @@ class CustomModelApp:
                 self._schedule_block_render(delay_ms=250)
             
         # [사용자 요청] 분석 중 생성되는 자막을 영상에 실시간으로 입힘 (디바운스로 부하 제어)
+        if (not self._analysis_in_progress) or len(self.results_data) <= self._live_preview_segment_limit:
+            self._schedule_preview_reload(force_reload=False, delay_ms=1000 if self._analysis_in_progress else 500)
+
+    def _on_update_row(self, task):
+        children = self.tree.get_children("")
+        idx = int(task["i"]) - 1
+        if 0 <= idx < len(children):
+            self.tree.item(children[idx], values=(task["i"], self.format_time(task['s']), self.format_time(task['e']), task['t']))
+        if hasattr(self, 'block_editor'):
+            if (not self._analysis_in_progress) or len(self.results_data) <= self._live_block_render_limit:
+                self._schedule_block_render(delay_ms=250)
         if (not self._analysis_in_progress) or len(self.results_data) <= self._live_preview_segment_limit:
             self._schedule_preview_reload(force_reload=False, delay_ms=1000 if self._analysis_in_progress else 500)
         
@@ -518,7 +555,8 @@ class CustomModelApp:
         self.progress_var = tk.DoubleVar(); ttk.Progressbar(c2, variable=self.progress_var).pack(fill=tk.X, pady=(4,0))
         self.use_burn_sub_var = tk.BooleanVar(value=False)
         self.save_frame = tk.Frame(c2, bg=C['bg2']); self.save_frame.pack(fill=tk.X, pady=4); self.save_frame.pack_forget()
-        tk.Checkbutton(self.save_frame, text='🔥 영상에 자막 입히기 (Re-encode)', variable=self.use_burn_sub_var, bg=C['bg2'], selectcolor=C['bg3'], activebackground=C['bg2'], font=_f, relief=tk.FLAT, bd=0).pack(anchor=tk.W, pady=(0, 4))
+        self.use_burn_sub_chk = tk.Checkbutton(self.save_frame, text='🔥 영상에 자막 입히기 (Re-encode)', variable=self.use_burn_sub_var, bg=C['bg2'], fg=C['text'], selectcolor=C['bg3'], activebackground=C['bg2'], activeforeground=C['text'], disabledforeground=C['text2'], font=_f, relief=tk.FLAT, bd=0)
+        self.use_burn_sub_chk.pack(anchor=tk.W, pady=(0, 4))
         btn_box = tk.Frame(self.save_frame, bg=C['bg2']); btn_box.pack(fill=tk.X)
         self.btn_fast_save = tk.Button(btn_box, text='  🚀 초고속 렌더링  ', command=lambda: self.start_export(fast=True), bg=C['purple'], fg='white', font=_f, relief='flat', bd=0, compound='center', pady=6, cursor='hand2'); self.btn_fast_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0,2)); _hover(self.btn_fast_save, C['purple'], '#9342B5')
         self.btn_pro_save = tk.Button(btn_box, text='  🎯 정밀 렌더링  ', command=lambda: self.start_export(fast=False), bg=C['bg3'], fg=C['text'], font=_f, relief='flat', bd=0, compound='center', pady=6, cursor='hand2'); self.btn_pro_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2,0)); _hover(self.btn_pro_save, C['bg3'], C['border'])
@@ -530,11 +568,12 @@ class CustomModelApp:
         self.beam_size_var = tk.IntVar(value=5)
         self.use_dominant_var = tk.BooleanVar(value=False)
         
-        chk_cfg = dict(bg=C['bg2'], selectcolor=C['bg3'], activebackground=C['bg2'], font=_f, relief=tk.FLAT, bd=0)
+        chk_cfg = dict(bg=C['bg2'], selectcolor=C['bg3'], activebackground=C['bg2'], activeforeground=C['text'], disabledforeground=C['text2'], font=_f, relief=tk.FLAT, bd=0)
         self.remove_punctuation_var = tk.BooleanVar(value=True); tk.Checkbutton(c3, text='✂️문장부호 제거', variable=self.remove_punctuation_var, fg=C['text2'], **chk_cfg).pack(anchor=tk.W, pady=1)
         self.use_denoise_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🧪 배경음 줄이기 (실험)', variable=self.use_denoise_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         self.use_demucs_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🧪 배경음 분리 (Demucs 실험)', variable=self.use_demucs_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         self.use_coreml_worker_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🧪 CoreML 메모리 절약 모드 (실험)', variable=self.use_coreml_worker_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
+        self.use_gemma4_mlx_filter_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🧪 Gemma 4 이상 세그먼트 필터 (MLX)', variable=self.use_gemma4_mlx_filter_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         _sep(c3)
         self.use_silero_vad_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='외부 VAD (Silero)', variable=self.use_silero_vad_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         self.use_whisper_vad_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='내부 VAD (Whisper)', variable=self.use_whisper_vad_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
@@ -549,11 +588,18 @@ class CustomModelApp:
         self.speech_pad_var = tk.DoubleVar(value=0.1); tk.Entry(r, textvariable=self.speech_pad_var, width=5, bg=C['bg3'], fg=C['text'], insertbackground=C['text'], relief=tk.FLAT, font=_f).pack(side=tk.RIGHT)
         
         r = _row(c3); tk.Label(r, text='VAD 임계', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
-        self.vad_threshold_var = tk.DoubleVar(value=0.35); tk.Scale(r, from_=0.1, to=0.9, resolution=0.05, orient=tk.HORIZONTAL, variable=self.vad_threshold_var, showvalue=1, length=120, bg=C['bg2'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.RIGHT)
+        self.vad_threshold_var = tk.DoubleVar(value=0.35)
+        self.vad_threshold_text = tk.StringVar(value="0.35")
+        tk.Label(r, textvariable=self.vad_threshold_text, width=5, anchor=tk.E, bg=C['bg2'], fg=C['text'], font=_f).pack(side=tk.RIGHT)
+        tk.Scale(r, from_=0.1, to=0.9, resolution=0.05, orient=tk.HORIZONTAL, variable=self.vad_threshold_var, showvalue=0, length=120, bg=C['bg2'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.RIGHT, padx=(0, 8))
+        self.vad_threshold_var.trace_add('write', lambda *_: self.vad_threshold_text.set(f"{self.vad_threshold_var.get():.2f}"))
         
         r = _row(c3); tk.Label(r, text='대사 길이', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
         self.max_len_int = tk.IntVar(value=20)
-        tk.Scale(r, from_=10, to=50, orient=tk.HORIZONTAL, variable=self.max_len_int, showvalue=1, length=120, bg=C['bg2'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.RIGHT)
+        self.max_len_text = tk.StringVar(value="20")
+        tk.Label(r, textvariable=self.max_len_text, width=4, anchor=tk.E, bg=C['bg2'], fg=C['text'], font=_f).pack(side=tk.RIGHT)
+        tk.Scale(r, from_=10, to=50, orient=tk.HORIZONTAL, variable=self.max_len_int, showvalue=0, length=120, bg=C['bg2'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.RIGHT, padx=(0, 8))
+        self.max_len_int.trace_add('write', lambda *_: self.max_len_text.set(str(self.max_len_int.get())))
         
         # [사용자 요청] ── 자막 설정 (스타일) 탭 UI 통합 구현 ──
         cs = self.tab_style
@@ -669,26 +715,66 @@ class CustomModelApp:
                         # 휠 방향 반전: 위로(delta>0) 올리면 시간 감소(-), 아래로(delta<0) 내리면 시간 증가(+)
                         delta = -0.05 if e.delta > 0 else 0.05
                         key = 's' if col == '#2' else 'e'
+                        link_adjacent = bool(e.state & 0x8 or e.state & 0x10)
+                        updated_idxs = [idx]
                         nv = max(0, self.results_data[idx][key] + delta)
-                        
+
                         # 안전장치 및 차단 로직
                         valid = True
-                        if key == 's':
+                        if link_adjacent and key == 'e' and idx < len(self.results_data) - 1:
+                            if nv <= self.results_data[idx]['s'] or nv >= self.results_data[idx + 1]['e']:
+                                valid = False
+                        elif link_adjacent and key == 's' and idx > 0:
+                            if nv <= self.results_data[idx - 1]['s'] or nv >= self.results_data[idx]['e']:
+                                valid = False
+                        elif key == 's':
                             if nv >= self.results_data[idx]['e'] or (idx > 0 and nv < self.results_data[idx-1]['e']): valid = False
                         else: # key == 'e'
                             if nv <= self.results_data[idx]['s'] or (idx < len(self.results_data)-1 and nv > self.results_data[idx+1]['s']): valid = False
-                        
+
                         if valid:
                             self.transcript_manager.save_state()
-                            self.results_data[idx][key] = round(nv, 3)
-                            
-                            # [시니어 최적화] 내부 단어 타임스탬프 동기화 (Word Block 뷰와 일관성 유지)
-                            words = self.results_data[idx].get('words', [])
-                            if words:
-                                if key == 's': words[0]['s'] = nv
-                                else: words[-1]['e'] = nv
+                            if link_adjacent and key == 'e' and idx < len(self.results_data) - 1:
+                                self.results_data[idx]['e'] = round(nv, 3)
+                                self.results_data[idx]['_manual_end_timing'] = True
+                                self.results_data[idx + 1]['s'] = round(nv, 3)
+                                self.results_data[idx + 1]['_manual_start_timing'] = True
+                                updated_idxs = [idx, idx + 1]
+                                words = self.results_data[idx].get('words', [])
+                                if words:
+                                    words[-1]['e'] = nv
+                                next_words = self.results_data[idx + 1].get('words', [])
+                                if next_words:
+                                    next_words[0]['s'] = nv
+                            elif link_adjacent and key == 's' and idx > 0:
+                                self.results_data[idx]['s'] = round(nv, 3)
+                                self.results_data[idx]['_manual_start_timing'] = True
+                                self.results_data[idx - 1]['e'] = round(nv, 3)
+                                self.results_data[idx - 1]['_manual_end_timing'] = True
+                                updated_idxs = [idx - 1, idx]
+                                words = self.results_data[idx].get('words', [])
+                                if words:
+                                    words[0]['s'] = nv
+                                prev_words = self.results_data[idx - 1].get('words', [])
+                                if prev_words:
+                                    prev_words[-1]['e'] = nv
+                            else:
+                                self.results_data[idx][key] = round(nv, 3)
+                                if key == 's':
+                                    self.results_data[idx]['_manual_start_timing'] = True
+                                else:
+                                    self.results_data[idx]['_manual_end_timing'] = True
 
-                            self.tree.set(item, column=col, value=self.format_time(nv))
+                                # [시니어 최적화] 내부 단어 타임스탬프 동기화 (Word Block 뷰와 일관성 유지)
+                                words = self.results_data[idx].get('words', [])
+                                if words:
+                                    if key == 's': words[0]['s'] = nv
+                                    else: words[-1]['e'] = nv
+
+                            if link_adjacent and len(updated_idxs) > 1:
+                                self.rebuild_tree_and_render(fast=True)
+                            else:
+                                self.tree.set(item, column=col, value=self.format_time(nv))
                             self.player.set_time(int(nv * 1000))
                             self.player.play()
                             self.apply_preview_subtitles(force_reload=True)
@@ -932,6 +1018,11 @@ class CustomModelApp:
         device_val = self.device_var.get()
         mapped_dev = mode_from_label(device_val)
 
+        use_whisperx_align = getattr(self, 'use_whisperx_var', tk.BooleanVar(value=False)).get()
+        use_whisperx_short_fallback = getattr(self, 'use_whisperx_short_fallback_var', tk.BooleanVar(value=False)).get()
+        # 기본 분석은 빠른 1차 전사만 사용하고, 정밀 싱크가 필요할 때만 단어 타임스탬프를 켠다.
+        use_word_timestamps = use_whisperx_align or use_whisperx_short_fallback
+
         analysis_options = AnalysisSettings(
             beam_size=self.beam_size_var.get(),
             use_denoise=self.use_denoise_var.get(),
@@ -941,11 +1032,12 @@ class CustomModelApp:
             vad_threshold=self.vad_threshold_var.get(),
             min_silence_ms=min_sil_ms,
             speech_pad_ms=pad_ms,
-            use_word_timestamps=True,
+            use_word_timestamps=use_word_timestamps,
             use_whisper_vad=self.use_whisper_vad_var.get(),
             use_silero_vad=self.use_silero_vad_var.get(),
-            use_whisperx_align=getattr(self, 'use_whisperx_var', tk.BooleanVar(value=False)).get(),
-            use_whisperx_short_fallback=getattr(self, 'use_whisperx_short_fallback_var', tk.BooleanVar(value=False)).get(),
+            use_whisperx_align=use_whisperx_align,
+            use_whisperx_short_fallback=use_whisperx_short_fallback,
+            use_gemma4_mlx_filter=getattr(self, 'use_gemma4_mlx_filter_var', tk.BooleanVar(value=False)).get(),
             remove_punctuation=getattr(self, 'remove_punctuation_var', tk.BooleanVar(value=False)).get(),
             use_coreml_worker=getattr(self, 'use_coreml_worker_var', tk.BooleanVar(value=False)).get(),
             device_mode=mapped_dev
@@ -997,30 +1089,17 @@ class CustomModelApp:
                         h, m, s, cs = int(sec//3600), int((sec%3600)//60), int(sec%60), int((sec%1)*100)
                         return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
-                    # 필러 처리 로직 (apply_preview_subtitles 에 추가한 것과 동일)
-                    _FILLERS = {'어', '음', '아', '으', '에', '이', '오', '우', '그', '저', '뭐', '막', '좀', '그냥'}
-                    def _get_display_start(r):
-                        words = r.get('words', [])
-                        if not words: return r['s']
-                        for w in words:
-                            wt = w['word'].strip() if isinstance(w, dict) else w.word.strip()
-                            wclean = wt.replace(' ', '').replace('.', '').replace(',', '').replace('-', '').replace('~', '')
-                            if not wclean: continue
-                            if wclean in _FILLERS or (len(wclean) <= 3 and len(set(wclean)) <= 1): continue
-                            ws = w['s'] if isinstance(w, dict) else w.s
-                            if ws - r['s'] > 1.5: return r['s']
-                            return ws
-                        return r['s']
-
                     # 3. 타임라인 매핑 (Cut 영상에 맞게 자막 시간 이동)
                     lines = []
                     current_out_time = 0.0
+                    subtitle_entries = self._get_subtitle_entries_no_overlap(use_display_start=True)
                     for m_start, m_end in merged:
-                        for r in self.results_data:
+                        for entry in subtitle_entries:
+                            r = entry["raw"]
                             # 세그먼트가 이 병합 구간 안에 있는지 확인
                             if r['s'] >= m_start - 0.001 and r['e'] <= m_end + 0.001:
-                                rel_s = _get_display_start(r) - m_start # 필러 보정 포함
-                                rel_e = r['e'] - m_start
+                                rel_s = entry["s"] - m_start
+                                rel_e = entry["e"] - m_start
                                 s_out, e_out = current_out_time + rel_s, current_out_time + rel_e
                                 lines.append(f"Dialogue: 0,{fmt_ass_time(s_out)},{fmt_ass_time(e_out)},Default,,0,0,0,,{r['t']}")
                         current_out_time += (m_end - m_start)
@@ -1266,12 +1345,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 return r['s']
 
             lines = []
-            for i, r in enumerate(self.results_data):
-                s_r = _get_display_start(r)  # 실제 단어 기준 표시 시작점
-                e_r = r['e']
-                if i < len(self.results_data) - 1 and e_r >= self.results_data[i+1]['s']:
-                    e_r = max(s_r + 0.1, self.results_data[i+1]['s'] - 0.05)
-                lines.append(f"Dialogue: 0,{fmt_ass_time(s_r)},{fmt_ass_time(e_r)},Default,,0,0,0,,{r['t']}")
+            for entry in self._get_subtitle_entries_no_overlap(use_display_start=True):
+                lines.append(f"Dialogue: 0,{fmt_ass_time(entry['s'])},{fmt_ass_time(entry['e'])},Default,,0,0,0,,{entry['t']}")
             
             # --- A/B 핑퉁 핫스왓 ---
             suffix = "A" if getattr(self, '_ping_pong', False) else "B"
@@ -1438,18 +1513,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if file_path:
             with open(file_path, "w", encoding="utf-8") as f:
                 if fmt == "SRT":
-                    for i, r in enumerate(self.results_data):
-                        s_r, e_r = r['s'], r['e']
-                        if i < len(self.results_data) - 1 and e_r >= self.results_data[i+1]['s']: e_r = max(s_r + 0.1, self.results_data[i+1]['s'] - 0.05)
-                        s = time.strftime('%H:%M:%S', time.gmtime(s_r)) + f",{int((s_r%1)*1000):03d}"; e = time.strftime('%H:%M:%S', time.gmtime(e_r)) + f",{int((e_r%1)*1000):03d}"; f.write(f"{i+1}\n{s} --> {e}\n{r['t']}\n\n")
+                    for i, entry in enumerate(self._get_subtitle_entries_no_overlap()):
+                        s_r, e_r = entry['s'], entry['e']
+                        s = time.strftime('%H:%M:%S', time.gmtime(s_r)) + f",{int((s_r%1)*1000):03d}"; e = time.strftime('%H:%M:%S', time.gmtime(e_r)) + f",{int((e_r%1)*1000):03d}"; f.write(f"{i+1}\n{s} --> {e}\n{entry['t']}\n\n")
                 elif fmt == "TXT":
                     for r in self.results_data: f.write(f"[{round(r['s'], 2)}s] {r['t']}\n")
                 elif fmt == "VTT":
                     f.write("WEBVTT\n\n")
-                    for i, r in enumerate(self.results_data):
-                        s_r, e_r = r['s'], r['e']
-                        if i < len(self.results_data) - 1 and e_r >= self.results_data[i+1]['s']: e_r = max(s_r + 0.1, self.results_data[i+1]['s'] - 0.05)
-                        s = time.strftime('%H:%M:%S', time.gmtime(s_r)) + f".{int((s_r%1)*1000):03d}"; e = time.strftime('%H:%M:%S', time.gmtime(e_r)) + f".{int((e_r%1)*1000):03d}"; f.write(f"{i+1}\n{s} --> {e}\n{r['t']}\n\n")
+                    for i, entry in enumerate(self._get_subtitle_entries_no_overlap()):
+                        s_r, e_r = entry['s'], entry['e']
+                        s = time.strftime('%H:%M:%S', time.gmtime(s_r)) + f".{int((s_r%1)*1000):03d}"; e = time.strftime('%H:%M:%S', time.gmtime(e_r)) + f".{int((e_r%1)*1000):03d}"; f.write(f"{i+1}\n{s} --> {e}\n{entry['t']}\n\n")
                 elif fmt == "CSV":
                     import csv
                     writer = csv.writer(f)
