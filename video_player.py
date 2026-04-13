@@ -207,6 +207,44 @@ class VideoPlayer:
             return True
         return False
 
+    def clear_subtitle(self):
+        """현재 적용된 외부 자막 트랙 비활성화"""
+        if not self.vlc_available or not self.player:
+            return False
+        try:
+            self.player.video_set_spu(-1)
+            return True
+        except Exception:
+            return False
+
+    def set_marquee(self, text, *, size=80, color=0xFFFFFF, opacity=255, margin_v=50):
+        """VLC marquee 텍스트를 영상 위에 직접 표시"""
+        if not self.vlc_available or not self.player:
+            return False
+        try:
+            self.player.video_set_marquee_int(vlc.VideoMarqueeOption.Enable, 1)
+            self.player.video_set_marquee_string(vlc.VideoMarqueeOption.Text, text or "")
+            self.player.video_set_marquee_int(vlc.VideoMarqueeOption.Size, max(8, int(size)))
+            self.player.video_set_marquee_int(vlc.VideoMarqueeOption.Color, int(color))
+            self.player.video_set_marquee_int(vlc.VideoMarqueeOption.Opacity, max(0, min(255, int(opacity))))
+            self.player.video_set_marquee_int(vlc.VideoMarqueeOption.Position, int(getattr(vlc.Position.bottom, "value", 6)))
+            self.player.video_set_marquee_int(vlc.VideoMarqueeOption.Timeout, 0)
+            self.player.video_set_marquee_int(vlc.VideoMarqueeOption.Refresh, 0)
+            self.player.video_set_marquee_int(vlc.VideoMarqueeOption.Y, max(0, int(margin_v)))
+            return True
+        except Exception as e:
+            self._debug_log(f"marquee_error: {e}")
+            return False
+
+    def clear_marquee(self):
+        if not self.vlc_available or not self.player:
+            return False
+        try:
+            self.player.video_set_marquee_int(vlc.VideoMarqueeOption.Enable, 0)
+            return True
+        except Exception:
+            return False
+
     def toggle_play(self):
         if not self.vlc_available: return False
         
@@ -238,6 +276,7 @@ class VideoPlayer:
     def stop(self):
         if self.vlc_available:
             self.player.stop()
+            self.clear_marquee()
         if sys.platform == "darwin" and self._ns_container is not None:
             try:
                 self._ns_container.setHidden_(True)

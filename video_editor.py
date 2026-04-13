@@ -2,8 +2,11 @@ import os
 import subprocess
 import time
 import re
+import tempfile
+import shutil
 import imageio_ffmpeg
 from typing import List, Dict, Tuple, Optional, Callable
+from subtitle_cues import SubtitleRenderStyle, SubtitleCue, ffmpeg_color, escape_ffmpeg_value
 
 class VideoEditor:
     """비디오 편집 엔진 (Match Source, Stream Copy 및 프리미어/리졸브 완벽 호환 XML 지원)"""
@@ -103,6 +106,40 @@ class VideoEditor:
             
         return info
 
+    def _build_drawtext_filter_chain(self, cues: List[SubtitleCue], style: SubtitleRenderStyle, text_dir: str) -> str:
+        if not cues:
+            return "[v_concat]null[outv]"
+
+        filters = ["[v_concat]"]
+        escaped_font = escape_ffmpeg_value(style.font_name)
+        fill_color = ffmpeg_color(style.fill_color)
+        outline_color = ffmpeg_color(style.outline_color)
+        shadow_color = ffmpeg_color(style.shadow_color)
+
+        for idx, cue in enumerate(cues):
+            text_path = os.path.join(text_dir, f"cue_{idx:05d}.txt")
+            with open(text_path, "w", encoding="utf-8") as fp:
+                fp.write(cue.text)
+            escaped_text_path = escape_ffmpeg_value(text_path)
+            draw = (
+                f"drawtext=textfile='{escaped_text_path}'"
+                f":font='{escaped_font}'"
+                f":fontsize={max(8, int(style.font_size))}"
+                f":fontcolor={fill_color}"
+                f":borderw={max(0, int(style.outline_width))}"
+                f":bordercolor={outline_color}"
+                f":shadowx={max(0, int(style.shadow_width))}"
+                f":shadowy={max(0, int(style.shadow_width))}"
+                f":shadowcolor={shadow_color}"
+                f":x=(w-text_w)/2"
+                f":y=h-text_h-{max(0, int(style.margin_v))}"
+                f":line_spacing=6"
+                f":enable='between(t,{cue.start:.3f},{cue.end:.3f})'"
+            )
+            filters.append(draw)
+        filters.append("[outv]")
+        return ",".join(filters)
+
     def export_premiere_xml(self, video_path: str, segments: List[Dict], output_xml: str, fps: float = 30.0) -> bool:
         """[시니어 최적화] 프리미어 프로/다빈치 리졸브 완벽 호환 FCP 7 XML 생성"""
         merged, _ = self.get_merged_segments_info(segments)
@@ -166,12 +203,12 @@ class VideoEditor:
             print(f"XML Export Error: {e}"); return False
 
     def cut_silence(self, input_video, output_video, segments, stop_event=None, progress_callback=None,
-                    v_codec="h264", a_codec="aac", v_bitrate="5000k", a_bitrate="128k", fast_mode=True, burn_ass: str = None) -> bool:
+                    v_codec="h264", a_codec="aac", v_bitrate="5000k", a_bitrate="128k", fast_mode=True, burn_payload: dict = None) -> bool:
         merged, total_out_duration = self.get_merged_segments_info(segments)
         if not merged or total_out_duration <= 0: return False
 
         # 자막을 입히려면 반드시 재인코딩이 필요하므로 fast_mode를 강제로 해제함
-        if burn_ass: fast_mode = False
+        if burn_payload: fast_mode = False
 
         if fast_mode:
             unique_id = int(time.time())
@@ -205,6 +242,7 @@ class VideoEditor:
                     os.rmdir(temp_dir)
                 except: pass
         else:
+            temp_drawtext_dir = None
             v_filters, a_filters, concat_input = [], [], ""
             for i, (start, end) in enumerate(merged):
                 s_adj, e_adj = max(0, start - 0.05), end + 0.05
@@ -214,11 +252,13 @@ class VideoEditor:
             
             filter_complex = "; ".join(v_filters + a_filters) + f"; {concat_input}concat=n={len(merged)}:v=1:a=1[v_concat][outa]"
             
-            # 자막 필터 추가: [v_concat]subtitles=ass_path[outv]
-            if burn_ass:
-                # FFmpeg subtitles 필터 경로 이스케이프 (Windows 콜론 및 역슬래시 처리)
-                clean_path = os.path.abspath(burn_ass).replace('\\', '/').replace(':', '\\:')
-                filter_complex += f"; [v_concat]subtitles='{clean_path}'[outv]"
+            if burn_payload:
+                style = burn_payload.get("style") if isinstance(burn_payload, dict) else None
+                cues = burn_payload.get("cues") if isinstance(burn_payload, dict) else None
+                style = style if isinstance(style, SubtitleRenderStyle) else SubtitleRenderStyle()
+                cues = list(cues or [])
+                temp_drawtext_dir = tempfile.mkdtemp(prefix="vibe_drawtext_", dir=self.base_dir)
+                filter_complex += "; " + self._build_drawtext_filter_chain(cues, style, temp_drawtext_dir)
             else:
                 filter_complex += "; [v_concat]null[outv]"
             
@@ -247,6 +287,8 @@ class VideoEditor:
             try: return self._execute_ffmpeg(cmd, total_out_duration, stop_event, progress_callback)
             finally:
                 if os.path.exists(script_path): os.remove(script_path)
+                if temp_drawtext_dir and os.path.exists(temp_drawtext_dir):
+                    shutil.rmtree(temp_drawtext_dir, ignore_errors=True)
 
     def _execute_ffmpeg(self, cmd, total_duration, stop_event, progress_callback):
         try:

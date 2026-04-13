@@ -4,18 +4,63 @@ import unittest
 from gui_app import CustomModelApp
 from timeline_manager import TranscriptManager
 from ui_block_editor import UIBlockEditor
+from subtitle_cues import build_subtitle_cues, remap_cues_for_merged_ranges, SubtitleRenderStyle, cues_to_srt, cues_to_vtt
+from video_editor import VideoEditor
 
 
 class DummyPlayer:
     def __init__(self):
         self.time_ms = None
         self.play_calls = 0
+        self.marquee_calls = []
+        self.clear_marquee_calls = 0
+        self.clear_subtitle_calls = 0
 
     def set_time(self, ms):
         self.time_ms = ms
 
     def play(self):
         self.play_calls += 1
+
+    def get_time(self):
+        return self.time_ms or 0
+
+    def clear_subtitle(self):
+        self.clear_subtitle_calls += 1
+        return True
+
+    def set_marquee(self, text, *, size=80, color=0xFFFFFF, opacity=255, margin_v=50):
+        self.marquee_calls.append(
+            {"text": text, "size": size, "color": color, "opacity": opacity, "margin_v": margin_v}
+        )
+        return True
+
+    def clear_marquee(self):
+        self.clear_marquee_calls += 1
+        return True
+
+
+class DummyLoopPlayer:
+    def __init__(self, *, position=0.0, time_ms=0, length_ms=0, playing=False):
+        self._position = position
+        self._time_ms = time_ms
+        self._length_ms = length_ms
+        self._playing = playing
+
+    def sync_video_container(self):
+        return None
+
+    def get_position(self):
+        return self._position
+
+    def get_time(self):
+        return self._time_ms
+
+    def get_length(self):
+        return self._length_ms
+
+    def is_playing(self):
+        return self._playing
 
 
 class TimingAndSplitRulesTests(unittest.TestCase):
@@ -43,6 +88,140 @@ class TimingAndSplitRulesTests(unittest.TestCase):
         entries = CustomModelApp._get_subtitle_entries_no_overlap(dummy, use_display_start=True)
 
         self.assertEqual(entries[0]["s"], 1.00)
+
+    def test_build_subtitle_cues_trims_overlap(self):
+        cues = build_subtitle_cues(
+            [
+                {"s": 1.0, "e": 2.0, "t": "첫 줄"},
+                {"s": 2.0, "e": 3.0, "t": "둘째 줄"},
+            ]
+        )
+
+        self.assertEqual(cues[0].end, 1.99)
+        self.assertEqual(cues[1].start, 2.0)
+
+    def test_remap_cues_for_merged_ranges_maps_to_cut_timeline(self):
+        cues = build_subtitle_cues(
+            [
+                {"s": 10.0, "e": 11.0, "t": "첫 줄"},
+                {"s": 20.0, "e": 21.0, "t": "둘째 줄"},
+            ]
+        )
+
+        remapped = remap_cues_for_merged_ranges(cues, [(10.0, 12.0), (20.0, 22.0)])
+
+        self.assertEqual(remapped[0].start, 0.0)
+        self.assertEqual(remapped[0].end, 1.0)
+        self.assertEqual(remapped[1].start, 2.0)
+        self.assertEqual(remapped[1].end, 3.0)
+
+    def test_cue_exports_format_without_ass(self):
+        cues = build_subtitle_cues([{"s": 1.0, "e": 2.0, "t": "첫 줄"}])
+
+        srt = cues_to_srt(cues)
+        vtt = cues_to_vtt(cues)
+
+        self.assertIn("00:00:01,000 --> 00:00:02,000", srt)
+        self.assertIn("WEBVTT", vtt)
+        self.assertIn("00:00:01.000 --> 00:00:02.000", vtt)
+
+    def test_video_editor_builds_drawtext_chain_from_cues(self):
+        editor = VideoEditor()
+        cues = build_subtitle_cues([{"s": 1.0, "e": 2.0, "t": "첫 줄"}])
+        style = SubtitleRenderStyle(font_name="Noto Sans KR", font_size=64, margin_v=60)
+
+        import tempfile, os, shutil
+        temp_dir = tempfile.mkdtemp(prefix="vibe_drawtext_test_")
+        try:
+            chain = editor._build_drawtext_filter_chain(cues, style, temp_dir)
+            self.assertIn("drawtext=", chain)
+            self.assertIn("enable='between(t,1.000,2.000)'", chain)
+            self.assertIn("fontsize=64", chain)
+            self.assertTrue(os.path.exists(os.path.join(temp_dir, "cue_00000.txt")))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_overlay_preview_uses_active_subtitle_text(self):
+        dummy = type("DummyApp", (), {})()
+        dummy.results_data = [
+            {"s": 1.00, "e": 2.00, "t": "첫 줄"},
+            {"s": 2.01, "e": 3.00, "t": "둘째 줄"},
+        ]
+        dummy._get_subtitle_entries_no_overlap = lambda use_display_start=False: CustomModelApp._get_subtitle_entries_no_overlap(dummy, use_display_start=use_display_start)
+
+        entry = CustomModelApp._get_live_overlay_entry(dummy, 2.5)
+
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry["t"], "둘째 줄")
+
+    def test_overlay_preview_returns_none_when_no_active_subtitle(self):
+        dummy = type("DummyApp", (), {})()
+        dummy.results_data = [
+            {"s": 1.00, "e": 2.00, "t": "첫 줄"},
+        ]
+        dummy._get_subtitle_entries_no_overlap = lambda use_display_start=False: CustomModelApp._get_subtitle_entries_no_overlap(dummy, use_display_start=use_display_start)
+
+        entry = CustomModelApp._get_live_overlay_entry(dummy, 2.5)
+
+        self.assertIsNone(entry)
+
+    def test_apply_preview_subtitles_uses_live_marquee_path(self):
+        player = DummyPlayer()
+        dummy = type("DummyApp", (), {})()
+        dummy.results_data = [{"s": 1.0, "e": 2.0, "t": "첫 줄"}]
+        dummy.player = player
+        dummy.use_live_overlay_preview = True
+        dummy._live_overlay_cache = {}
+        dummy.sub_font_size = type("Var", (), {"get": lambda self: 80})()
+        dummy.sub_color_f = type("Var", (), {"get": lambda self: "#FFFFFF"})()
+        dummy.sub_y_pos = type("Var", (), {"get": lambda self: 50})()
+        dummy._get_subtitle_entries_no_overlap = lambda use_display_start=False: CustomModelApp._get_subtitle_entries_no_overlap(dummy, use_display_start=use_display_start)
+        dummy._get_live_overlay_entry = lambda curr_sec: CustomModelApp._get_live_overlay_entry(dummy, curr_sec)
+        dummy._hex_to_vlc_color = lambda hex_color: CustomModelApp._hex_to_vlc_color(dummy, hex_color)
+        dummy._apply_live_overlay_for_time = lambda curr_sec, force=False: CustomModelApp._apply_live_overlay_for_time(dummy, curr_sec, force=force)
+        player.time_ms = 1500
+
+        CustomModelApp.apply_preview_subtitles(dummy, force_reload=True)
+
+        self.assertEqual(player.clear_subtitle_calls, 1)
+        self.assertEqual(player.clear_marquee_calls, 0)
+        self.assertEqual(player.marquee_calls[-1]["text"], "첫 줄")
+
+    def test_apply_preview_subtitles_clears_live_marquee_when_no_results(self):
+        player = DummyPlayer()
+        dummy = type("DummyApp", (), {})()
+        dummy.results_data = []
+        dummy.player = player
+        dummy.use_live_overlay_preview = True
+
+        CustomModelApp.apply_preview_subtitles(dummy, force_reload=True)
+
+        self.assertEqual(player.clear_marquee_calls, 1)
+
+    def test_update_loop_handles_unknown_total_length_with_live_overlay(self):
+        calls = []
+        seek_values = []
+        play_states = []
+
+        dummy = type("DummyApp", (), {})()
+        dummy.player = DummyLoopPlayer(position=0.2, time_ms=500, length_ms=0, playing=False)
+        dummy.is_seeking = False
+        dummy.seek_var = type("Var", (), {"set": lambda self, value: seek_values.append(value)})()
+        dummy.results_data = []
+        dummy.root = type("Root", (), {"after": lambda self, delay, cb: calls.append(("after", delay, cb.__name__))})()
+        dummy.btn_play = type("Btn", (), {"config": lambda self, **kwargs: play_states.append(kwargs.get("text"))})()
+        dummy.ICON_PLAY = "PLAY"
+        dummy.ICON_PAUSE = "PAUSE"
+        dummy.use_live_overlay_preview = True
+        dummy._apply_live_overlay_for_time = lambda curr_sec: calls.append(("overlay", round(curr_sec, 3)))
+        dummy.update_loop = lambda: None
+
+        CustomModelApp.update_loop(dummy)
+
+        self.assertIn(("overlay", 0.5), calls)
+        self.assertIn(("after", 16, "<lambda>"), calls)
+        self.assertEqual(seek_values, [200.0])
+        self.assertEqual(play_states[-1], "PLAY")
 
     def test_manual_start_timing_uses_segment_start_for_subtitles(self):
         dummy = type("DummyApp", (), {})()
