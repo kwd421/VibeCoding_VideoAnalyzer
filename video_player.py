@@ -8,19 +8,42 @@ import vlc
 if sys.platform == "darwin":
     try:
         import objc
-        from AppKit import NSApp, NSMakeRect, NSView, NSWindowAbove
+        from AppKit import (
+            NSApp,
+            NSMakeRect,
+            NSView,
+            NSWindowAbove,
+            NSTextField,
+            NSColor,
+            NSFont,
+            NSShadow,
+            NSCenterTextAlignment,
+            NSLineBreakByWordWrapping,
+        )
     except Exception:
         objc = None
         NSApp = None
         NSMakeRect = None
         NSView = None
         NSWindowAbove = None
+        NSTextField = None
+        NSColor = None
+        NSFont = None
+        NSShadow = None
+        NSCenterTextAlignment = None
+        NSLineBreakByWordWrapping = None
 else:
     objc = None
     NSApp = None
     NSMakeRect = None
     NSView = None
     NSWindowAbove = None
+    NSTextField = None
+    NSColor = None
+    NSFont = None
+    NSShadow = None
+    NSCenterTextAlignment = None
+    NSLineBreakByWordWrapping = None
 
 class VideoPlayer:
     def __init__(self, canvas_widget):
@@ -33,6 +56,9 @@ class VideoPlayer:
         self._ns_container = None
         self._ns_window = None
         self._ns_content = None
+        self._ns_overlay = None
+        self._ns_overlay_label = None
+        self._overlay_state = {}
         try:
             self.instance = vlc.Instance(*self._get_vlc_args())
             self.player = self.instance.media_player_new()
@@ -89,6 +115,7 @@ class VideoPlayer:
                         self._ns_container.removeFromSuperview()
                     except Exception:
                         pass
+                self._invalidate_macos_overlay()
                 container = NSView.alloc().initWithFrame_(content.bounds())
                 container.setWantsLayer_(True)
                 if NSWindowAbove is not None and hasattr(content, "addSubview_positioned_relativeTo_"):
@@ -99,6 +126,7 @@ class VideoPlayer:
                 self._ns_window = window
                 self._ns_content = content
                 self._debug_log(f"attach: new_container window={window}")
+                self._ensure_macos_overlay()
             self._sync_macos_container()
             self.player.set_nsobject(objc.pyobjc_id(self._ns_container))
             self.embedded_video = True
@@ -128,9 +156,145 @@ class VideoPlayer:
             self._ns_container.setNeedsDisplay_(True)
             if hasattr(self._ns_container, "displayIfNeeded"):
                 self._ns_container.displayIfNeeded()
+            self._sync_macos_overlay()
         except Exception as e:
             print(f"macOS video sync failed: {e}")
             self._debug_log(f"sync_error: {e}")
+
+    def _invalidate_macos_overlay(self):
+        if sys.platform != "darwin":
+            return
+        try:
+            if self._ns_overlay_label is not None:
+                try:
+                    self._ns_overlay_label.removeFromSuperview()
+                except Exception:
+                    pass
+            if self._ns_overlay is not None:
+                try:
+                    self._ns_overlay.removeFromSuperview()
+                except Exception:
+                    pass
+        finally:
+            self._ns_overlay = None
+            self._ns_overlay_label = None
+
+    def _ensure_macos_overlay(self):
+        if sys.platform != "darwin":
+            return
+        if not all([NSView, NSTextField, self._ns_content]):
+            return
+        try:
+            if self._ns_overlay is None or getattr(self._ns_overlay, "superview", lambda: None)() != self._ns_content:
+                self._invalidate_macos_overlay()
+                overlay = NSView.alloc().initWithFrame_(self._ns_content.bounds())
+                overlay.setWantsLayer_(True)
+                if NSWindowAbove is not None and hasattr(self._ns_content, "addSubview_positioned_relativeTo_"):
+                    self._ns_content.addSubview_positioned_relativeTo_(overlay, NSWindowAbove, self._ns_container)
+                else:
+                    self._ns_content.addSubview_(overlay)
+                overlay.setHidden_(False)
+                label = NSTextField.alloc().initWithFrame_(overlay.bounds())
+                label.setBezeled_(False)
+                label.setBordered_(False)
+                label.setEditable_(False)
+                label.setSelectable_(False)
+                label.setDrawsBackground_(False)
+                label.setAlignment_(NSCenterTextAlignment)
+                label.setLineBreakMode_(NSLineBreakByWordWrapping)
+                cell = label.cell()
+                if cell is not None:
+                    try:
+                        cell.setWraps_(True)
+                        cell.setScrollable_(False)
+                        cell.setLineBreakMode_(NSLineBreakByWordWrapping)
+                    except Exception:
+                        pass
+                label.setHidden_(True)
+                overlay.addSubview_(label)
+                self._ns_overlay = overlay
+                self._ns_overlay_label = label
+        except Exception as e:
+            self._debug_log(f"overlay_init_error: {e}")
+
+    def _sync_macos_overlay(self):
+        if sys.platform != "darwin" or self._ns_overlay is None or self._ns_container is None:
+            return
+        try:
+            frame = self._ns_container.frame()
+            self._ns_overlay.setFrame_(frame)
+            if self._ns_overlay_label is not None and self._overlay_state:
+                margin_v = max(0, int(self._overlay_state.get("margin_v", 50)))
+                font_size = max(8, int(self._overlay_state.get("size", 80)))
+                width = max(120, int(frame.size.width - 120))
+                height = max(int(font_size * 2.8), 120)
+                x = max(0, int((frame.size.width - width) / 2))
+                y = max(0, int(margin_v))
+                self._ns_overlay_label.setFrame_(NSMakeRect(x, y, width, height))
+        except Exception as e:
+            self._debug_log(f"overlay_sync_error: {e}")
+
+    def set_live_subtitle(self, text, *, size=80, color=0xFFFFFF, opacity=255, margin_v=50, font_name=None):
+        if sys.platform != "darwin" or self._ns_content is None:
+            return self.set_marquee(text, size=size, color=color, opacity=opacity, margin_v=margin_v)
+        self._ensure_macos_overlay()
+        if self._ns_overlay_label is None:
+            return self.set_marquee(text, size=size, color=color, opacity=opacity, margin_v=margin_v)
+        try:
+            self._overlay_state = {
+                "text": text or "",
+                "size": max(8, int(size)),
+                "color": int(color),
+                "opacity": max(0, min(255, int(opacity))),
+                "margin_v": max(0, int(margin_v)),
+                "font_name": font_name or "",
+            }
+            if not text:
+                if self._ns_overlay is not None:
+                    self._ns_overlay.setHidden_(False)
+                self._ns_overlay_label.setHidden_(True)
+                return True
+            r = ((int(color) >> 16) & 0xFF) / 255.0
+            g = ((int(color) >> 8) & 0xFF) / 255.0
+            b = (int(color) & 0xFF) / 255.0
+            a = max(0.0, min(1.0, opacity / 255.0))
+            font = None
+            if font_name:
+                try:
+                    font = NSFont.fontWithName_size_(font_name, max(8, int(size)))
+                except Exception:
+                    font = None
+            if font is None:
+                font = NSFont.boldSystemFontOfSize_(max(8, int(size)))
+            self._ns_overlay_label.setFont_(font)
+            self._ns_overlay_label.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(r, g, b, a))
+            shadow = NSShadow.alloc().init()
+            shadow.setShadowColor_(NSColor.colorWithCalibratedWhite_alpha_(0.0, 0.95))
+            shadow.setShadowBlurRadius_(4.0)
+            shadow.setShadowOffset_((0.0, -1.0))
+            self._ns_overlay_label.setShadow_(shadow)
+            self._ns_overlay_label.setStringValue_(text or "")
+            self._ns_overlay.setHidden_(False)
+            self._ns_overlay_label.setHidden_(False)
+            self._sync_macos_overlay()
+            self._debug_log(f"live_subtitle: text='{text[:40]}' size={size} margin_v={margin_v}")
+            return True
+        except Exception as e:
+            self._debug_log(f"live_subtitle_error: {e}")
+            return self.set_marquee(text, size=size, color=color, opacity=opacity, margin_v=margin_v)
+
+    def clear_live_subtitle(self):
+        if sys.platform == "darwin" and self._ns_overlay_label is not None:
+            try:
+                self._overlay_state = {}
+                self._ns_overlay_label.setStringValue_("")
+                self._ns_overlay_label.setHidden_(True)
+                if self._ns_overlay is not None:
+                    self._ns_overlay.setHidden_(False)
+                return True
+            except Exception:
+                pass
+        return self.clear_marquee()
 
     def sync_video_container(self):
         if sys.platform == "darwin":
@@ -276,10 +440,15 @@ class VideoPlayer:
     def stop(self):
         if self.vlc_available:
             self.player.stop()
-            self.clear_marquee()
+            self.clear_live_subtitle()
         if sys.platform == "darwin" and self._ns_container is not None:
             try:
                 self._ns_container.setHidden_(True)
+            except Exception:
+                pass
+        if sys.platform == "darwin" and self._ns_overlay is not None:
+            try:
+                self._ns_overlay.setHidden_(True)
             except Exception:
                 pass
 

@@ -161,17 +161,17 @@ class CustomModelApp:
             self._live_overlay_cache = {}
         if not force and style == self._live_overlay_cache:
             return
-        self.player.clear_subtitle()
         if style["text"]:
-            self.player.set_marquee(
+            self.player.set_live_subtitle(
                 style["text"],
                 size=style["size"],
                 color=style["color"],
                 opacity=255,
                 margin_v=style["margin_v"],
+                font_name=self.sub_font.get() if hasattr(self, "sub_font") else "맑은 고딕",
             )
         else:
-            self.player.clear_marquee()
+            self.player.clear_live_subtitle()
         self._live_overlay_cache = style.copy()
 
     def __init__(self, root, startup_progress=None):
@@ -1265,7 +1265,7 @@ class CustomModelApp:
         if not self.player:
             return
         if not self.results_data:
-            self.player.clear_marquee()
+            self.player.clear_live_subtitle()
             self._live_overlay_cache = {}
             return
         try:

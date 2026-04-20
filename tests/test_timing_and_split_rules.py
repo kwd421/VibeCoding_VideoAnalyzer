@@ -12,6 +12,8 @@ class DummyPlayer:
     def __init__(self):
         self.time_ms = None
         self.play_calls = 0
+        self.live_subtitle_calls = []
+        self.clear_live_subtitle_calls = 0
         self.marquee_calls = []
         self.clear_marquee_calls = 0
         self.clear_subtitle_calls = 0
@@ -24,6 +26,23 @@ class DummyPlayer:
 
     def get_time(self):
         return self.time_ms or 0
+
+    def set_live_subtitle(self, text, *, size=80, color=0xFFFFFF, opacity=255, margin_v=50, font_name=None):
+        self.live_subtitle_calls.append(
+            {
+                "text": text,
+                "size": size,
+                "color": color,
+                "opacity": opacity,
+                "margin_v": margin_v,
+                "font_name": font_name,
+            }
+        )
+        return True
+
+    def clear_live_subtitle(self):
+        self.clear_live_subtitle_calls += 1
+        return True
 
     def clear_subtitle(self):
         self.clear_subtitle_calls += 1
@@ -175,6 +194,7 @@ class TimingAndSplitRulesTests(unittest.TestCase):
         dummy.sub_font_size = type("Var", (), {"get": lambda self: 80})()
         dummy.sub_color_f = type("Var", (), {"get": lambda self: "#FFFFFF"})()
         dummy.sub_y_pos = type("Var", (), {"get": lambda self: 50})()
+        dummy.sub_font = type("Var", (), {"get": lambda self: "맑은 고딕"})()
         dummy._get_subtitle_entries_no_overlap = lambda use_display_start=False: CustomModelApp._get_subtitle_entries_no_overlap(dummy, use_display_start=use_display_start)
         dummy._get_live_overlay_entry = lambda curr_sec: CustomModelApp._get_live_overlay_entry(dummy, curr_sec)
         dummy._hex_to_vlc_color = lambda hex_color: CustomModelApp._hex_to_vlc_color(dummy, hex_color)
@@ -183,9 +203,11 @@ class TimingAndSplitRulesTests(unittest.TestCase):
 
         CustomModelApp.apply_preview_subtitles(dummy, force_reload=True)
 
-        self.assertEqual(player.clear_subtitle_calls, 1)
+        self.assertEqual(player.clear_subtitle_calls, 0)
+        self.assertEqual(player.clear_live_subtitle_calls, 0)
         self.assertEqual(player.clear_marquee_calls, 0)
-        self.assertEqual(player.marquee_calls[-1]["text"], "첫 줄")
+        self.assertEqual(player.live_subtitle_calls[-1]["text"], "첫 줄")
+        self.assertEqual(player.live_subtitle_calls[-1]["font_name"], "맑은 고딕")
 
     def test_apply_preview_subtitles_clears_live_marquee_when_no_results(self):
         player = DummyPlayer()
@@ -196,7 +218,7 @@ class TimingAndSplitRulesTests(unittest.TestCase):
 
         CustomModelApp.apply_preview_subtitles(dummy, force_reload=True)
 
-        self.assertEqual(player.clear_marquee_calls, 1)
+        self.assertEqual(player.clear_live_subtitle_calls, 1)
 
     def test_update_loop_handles_unknown_total_length_with_live_overlay(self):
         calls = []
