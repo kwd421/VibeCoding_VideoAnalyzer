@@ -4,7 +4,7 @@
 
 A local-first desktop video transcription, subtitle editing, preview, and export tool.
 
-The current project is a Python/Tk macOS-focused build of the original video analyzer workflow. It keeps the analysis pipeline local where possible, exposes timing controls for subtitle correction, and now renders preview subtitles directly over the video instead of relying on temporary ASS preview files.
+The current project is a Python/Tk macOS-focused build of the original video analyzer workflow. It keeps the analysis pipeline local where possible, exposes timing controls for subtitle correction, and previews subtitles directly on top of the video.
 
 ## Preview
 
@@ -16,7 +16,7 @@ The current project is a Python/Tk macOS-focused build of the original video ana
 
 - Main branch in active development: `mac-experiment`
 - Runtime target: local desktop app launched from `main.py`
-- Preview direction: live in-app subtitle overlay from normalized subtitle cues
+- Preview direction: live in-app subtitles on top of the video
 - Export direction: subtitle/text exports plus video render/burn support
 - Experimental options: WhisperX alignment, Demucs vocal separation, Gemma 4 MLX suspicious-segment filtering
 
@@ -30,7 +30,7 @@ The current project is a Python/Tk macOS-focused build of the original video ana
 - Adjust timing with mouse wheel shortcuts, including adjacent-boundary movement for shared subtitle edges.
 - Preview subtitles through a live overlay on top of the video player.
 - Export subtitles as `SRT`, `VTT`, `TXT`, `CSV`, and `FCPXML`.
-- Render video ranges and optionally burn subtitles using FFmpeg drawtext filters generated from subtitle cues.
+- Render video ranges and optionally burn subtitles into the exported video.
 
 ## Requirements
 
@@ -56,39 +56,3 @@ If dependencies are installed in another Python environment:
 ```bash
 python main.py
 ```
-
-## Test
-
-```bash
-PYTHONPATH=$PWD .venv/bin/python -m unittest tests.test_timing_and_split_rules
-```
-
-Useful import/compile smoke check:
-
-```bash
-PYTHONPATH=$PWD .venv/bin/python -m py_compile \
-  main.py \
-  tools/coreml_transcribe_worker.py \
-  app/ui/gui_app.py \
-  app/ui/ui_block_editor.py \
-  app/ui/video_player.py \
-  app/engine/engine_core.py \
-  app/engine/analysis_controller.py \
-  app/engine/audio_processor.py \
-  app/engine/vision_processor.py \
-  app/core/config_models.py \
-  app/core/subtitle_cues.py \
-  app/core/timeline_manager.py \
-  app/core/text_sanitizer.py \
-  app/core/event_dispatcher.py \
-  app/core/transcription_backends.py \
-  app/media/video_editor.py
-```
-
-## Notes For Contributors
-
-- Keep runtime-generated media, previews, model weights, and backup files out of git.
-- Preserve editor-visible subtitle timing as the source of truth for preview and export.
-- Avoid reintroducing temporary ASS preview files into the live preview path.
-- Treat experimental options as opt-in and transparent: failures should be visible rather than hidden by unrelated fallbacks.
-- When moving code, keep imports package-based under `app.*` so packaged builds and worker scripts stay predictable.

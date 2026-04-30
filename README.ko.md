@@ -16,7 +16,7 @@
 
 - 개발 브랜치: `mac-experiment`
 - 실행 진입점: `main.py`
-- 자막 미리보기: 임시 ASS 파일 대신 정규화된 subtitle cue 기반 라이브 오버레이
+- 자막 미리보기: 영상 위에 직접 표시되는 라이브 자막
 - 내보내기: 자막 포맷, FCPXML, 영상 렌더/자막 번인 지원
 - 실험 옵션: WhisperX 정렬, Demucs 보컬 분리, Gemma 4 MLX 이상 세그먼트 필터
 
@@ -30,7 +30,7 @@
 - 마우스 휠 기반 싱크 조정과 인접 자막 경계 동시 이동을 지원합니다.
 - 영상 위에 직접 자막 오버레이를 띄워 미리볼 수 있습니다.
 - `SRT`, `VTT`, `TXT`, `CSV`, `FCPXML` 형식으로 내보낼 수 있습니다.
-- FFmpeg drawtext 필터를 생성해 자막 번인 렌더링을 수행할 수 있습니다.
+- 자막을 영상에 입혀서 렌더링할 수 있습니다.
 
 ## 실행 요구사항
 
@@ -56,39 +56,3 @@
 ```bash
 python main.py
 ```
-
-## 테스트
-
-```bash
-PYTHONPATH=$PWD .venv/bin/python -m unittest tests.test_timing_and_split_rules
-```
-
-컴파일/임포트 확인용 스모크 테스트:
-
-```bash
-PYTHONPATH=$PWD .venv/bin/python -m py_compile \
-  main.py \
-  tools/coreml_transcribe_worker.py \
-  app/ui/gui_app.py \
-  app/ui/ui_block_editor.py \
-  app/ui/video_player.py \
-  app/engine/engine_core.py \
-  app/engine/analysis_controller.py \
-  app/engine/audio_processor.py \
-  app/engine/vision_processor.py \
-  app/core/config_models.py \
-  app/core/subtitle_cues.py \
-  app/core/timeline_manager.py \
-  app/core/text_sanitizer.py \
-  app/core/event_dispatcher.py \
-  app/core/transcription_backends.py \
-  app/media/video_editor.py
-```
-
-## 개발 메모
-
-- 실행 중 생성되는 미디어, 프리뷰 파일, 모델 가중치, 백업 파일은 git에 올리지 않습니다.
-- 에디터에서 보이는 자막 시간이 미리보기와 내보내기의 기준입니다.
-- 라이브 미리보기 경로에 임시 ASS 파일 의존성을 다시 넣지 않는 것을 원칙으로 합니다.
-- 실험 기능은 명시적으로 켰을 때만 동작해야 하며, 실패를 엉뚱한 fallback으로 숨기지 않아야 합니다.
-- 코드 이동 시 `app.*` 패키지 import를 유지해 패키징과 워커 스크립트가 예측 가능하게 동작하도록 합니다.
