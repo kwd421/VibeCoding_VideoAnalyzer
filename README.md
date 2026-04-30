@@ -1,10 +1,16 @@
 # VibeCoding Video Analyzer
 
+[한국어 README 보기](README.ko.md)
+
 A local-first desktop video transcription, subtitle editing, preview, and export tool.
 
 The current project is a Python/Tk macOS-focused build of the original video analyzer workflow. It keeps the analysis pipeline local where possible, exposes timing controls for subtitle correction, and now renders preview subtitles directly over the video instead of relying on temporary ASS preview files.
 
-[한국어 README 보기](README.ko.md)
+## Preview
+
+[![VibeCoding Video Analyzer preview](https://img.youtube.com/vi/_hM43KQNOYo/maxresdefault.jpg)](https://www.youtube.com/watch?v=_hM43KQNOYo)
+
+[Watch the preview on YouTube](https://www.youtube.com/watch?v=_hM43KQNOYo)
 
 ## Current Status
 
