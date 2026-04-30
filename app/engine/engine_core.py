@@ -11,6 +11,7 @@ import tempfile
 import shutil
 import noisereduce as nr
 import re
+import json
 from collections import Counter
 from PIL import Image
 from transformers import CLIPProcessor, CLIPModel
@@ -19,11 +20,11 @@ from silero_vad import load_silero_vad, get_speech_timestamps
 import imageio_ffmpeg
 import concurrent.futures
 from dataclasses import dataclass
-from config_models import AnalysisSettings, TranscriptSegment, TranscriptWord
-from text_sanitizer import TextSanitizer
-from audio_processor import AudioProcessor
-from vision_processor import VisionProcessor
-from transcription_backends import backend_kind
+from app.core.config_models import AnalysisSettings, TranscriptSegment, TranscriptWord
+from app.core.text_sanitizer import TextSanitizer
+from app.engine.audio_processor import AudioProcessor
+from app.engine.vision_processor import VisionProcessor
+from app.core.transcription_backends import backend_kind
 
 try:
     from pywhispercpp.model import Model as WhisperCppModel
@@ -35,6 +36,19 @@ except ImportError:
 try:
     import whisperx
     import whisperx.utils
+    try:
+        import nltk
+        _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        _nltk_paths = [
+            os.path.join(os.getcwd(), ".venv", "nltk_data"),
+            os.path.join(_PROJECT_ROOT, ".venv", "nltk_data"),
+            os.path.join(_PROJECT_ROOT, "nltk_data"),
+        ]
+        for _p in _nltk_paths:
+            if os.path.isdir(_p) and _p not in nltk.data.path:
+                nltk.data.path.insert(0, _p)
+    except Exception:
+        pass
     HAS_WHISPERX = True
     # [시니어] WhisperX 한국어 띄어쓰기 삭제 버그 우회 (Monkey Patch)
     if hasattr(whisperx.utils, "LANGUAGES_WITHOUT_SPACES") and "ko" in whisperx.utils.LANGUAGES_WITHOUT_SPACES:
@@ -42,7 +56,6 @@ try:
 except ImportError:
     HAS_WHISPERX = False
     print("[WARN] WhisperX module not found. Forced alignment feature is disabled.")
-
 
 @dataclass
 class RuntimeWord:
@@ -95,6 +108,140 @@ class HyperTranscriptionEngine:
         self.cpu_cores = max(1, int(total_cores * 0.5))
         self.device_info = "auto"
         self.align_models_cache = {}    # [캐싱] (언어, 디바이스)별 WhisperX 정렬 모델
+        self.gemma4_mlx_model = None
+        self.gemma4_mlx_processor = None
+        self.gemma4_mlx_model_id = None
+        self.gemma4_mlx_warned = False
+
+    @staticmethod
+    def _should_fallback_short_whisperx_segment(orig_seg, aligned_seg):
+        """Use original timings when WhisperX over-compresses very short utterances.
+
+        This is intentionally conservative so longer lines keep their improved starts.
+        """
+        orig_duration = max(0.0, float(orig_seg.end) - float(orig_seg.start))
+        aligned_duration = max(0.0, float(aligned_seg.end) - float(aligned_seg.start))
+        if orig_duration <= 0.0 or aligned_duration <= 0.0:
+            return False
+        if orig_duration > 1.8:
+            return False
+        if aligned_duration >= 0.9:
+            return False
+        if aligned_duration >= (orig_duration * 0.7):
+            return False
+        if (orig_duration - aligned_duration) < 0.18:
+            return False
+        return True
+
+    @staticmethod
+    def _should_review_with_gemma4_text(text):
+        if not text:
+            return False
+        text = str(text).strip()
+        if len(text) < 2:
+            return True
+
+        tokens = [tok for tok in re.split(r"\s+", text) if tok]
+        if len(tokens) >= 3 and len(set(tokens)) == 1:
+            return True
+
+        normalized = re.sub(r"[\s\W_]+", "", text)
+        if len(normalized) < 2:
+            return True
+
+        if len(normalized) >= 6:
+            half = len(normalized) // 2
+            if half > 0 and normalized[:half] == normalized[half:half * 2]:
+                return True
+
+        if re.search(r"(.)\1{5,}", normalized):
+            return True
+
+        if re.search(r"(.{2,12})\s+\1(\s+\1)+", text):
+            return True
+
+        return False
+
+    def _get_gemma4_mlx_model_id(self):
+        return os.environ.get("MLX_GEMMA4_MODEL", "mlx-community/gemma-4-e4b-it-8bit")
+
+    def _ensure_gemma4_mlx_runtime(self):
+        model_id = self._get_gemma4_mlx_model_id()
+        if (
+            self.gemma4_mlx_model is not None
+            and self.gemma4_mlx_processor is not None
+            and self.gemma4_mlx_model_id == model_id
+        ):
+            return self.gemma4_mlx_model, self.gemma4_mlx_processor
+
+        try:
+            from mlx_vlm import load
+        except Exception as e:
+            if not self.gemma4_mlx_warned:
+                print(f"[WARN] Gemma 4 MLX runtime unavailable: {e}")
+                self.gemma4_mlx_warned = True
+            return None, None
+
+        try:
+            model, processor = load(model_id)
+            self.gemma4_mlx_model = model
+            self.gemma4_mlx_processor = processor
+            self.gemma4_mlx_model_id = model_id
+            return model, processor
+        except Exception as e:
+            if not self.gemma4_mlx_warned:
+                print(f"[WARN] Gemma 4 MLX model load failed ({model_id}): {e}")
+                self.gemma4_mlx_warned = True
+            return None, None
+
+    def _review_with_gemma4_mlx(self, text):
+        model, processor = self._ensure_gemma4_mlx_runtime()
+        if model is None or processor is None:
+            return None
+
+        prompt = processor.apply_chat_template(
+            [{
+                "role": "user",
+                "content": (
+                    "다음 한국어 자막 세그먼트가 정상 대사인지 판정해. "
+                    "짧거나 구어체라도 정상 대사면 KEEP. "
+                    "반복 환각, 의미 없는 잡음, 명백한 가비지면 DROP. "
+                    "KEEP 또는 DROP만 답해.\n"
+                    f"세그먼트: {text}"
+                ),
+            }],
+            add_generation_prompt=True,
+        )
+
+        try:
+            from mlx_vlm import generate
+            result = generate(model, processor, prompt=prompt, verbose=False, max_tokens=8)
+            output = (getattr(result, "text", "") or "").strip().upper()
+            clean = re.sub(r"[^A-Z]", "", output)
+            if "DROP" in clean:
+                return False
+            if "KEEP" in clean:
+                return True
+        except Exception as e:
+            if not self.gemma4_mlx_warned:
+                print(f"[WARN] Gemma 4 MLX inference failed: {e}")
+                self.gemma4_mlx_warned = True
+        return None
+
+    def _filter_segments_with_gemma4_mlx(self, segs_list):
+        filtered = []
+        for seg in segs_list:
+            text = getattr(seg, "text", "") or ""
+            if not self._should_review_with_gemma4_text(text):
+                filtered.append(seg)
+                continue
+
+            verdict = self._review_with_gemma4_mlx(text)
+            if verdict is False:
+                print(f"[INFO] Gemma 4 MLX filter dropped suspicious segment: {text[:80]}")
+                continue
+            filtered.append(seg)
+        return filtered
 
     def release_runtime_memory(self):
         """Release backend/model objects so long-running sessions do not accumulate memory across analyses."""
@@ -108,6 +255,10 @@ class HyperTranscriptionEngine:
             self.vad_device_info = None
             self.align_models_cache.clear()
             self.mps_segment_fallback_warned = False
+            self.gemma4_mlx_model = None
+            self.gemma4_mlx_processor = None
+            self.gemma4_mlx_model_id = None
+            self.gemma4_mlx_warned = False
 
             if hasattr(self.vision_processor, "clip_model"):
                 self.vision_processor.clip_model = None
@@ -115,6 +266,8 @@ class HyperTranscriptionEngine:
                 self.vision_processor.clip_processor = None
             if hasattr(self.vision_processor, "clip_model_key"):
                 self.vision_processor.clip_model_key = None
+            if hasattr(AudioProcessor, "release_cached_models"):
+                AudioProcessor.release_cached_models()
 
             import gc
             gc.collect()
@@ -128,6 +281,8 @@ class HyperTranscriptionEngine:
     def release_analysis_memory(self):
         """Drop per-analysis caches without forcing full model reload during the same run."""
         try:
+            if hasattr(AudioProcessor, "release_cached_models"):
+                AudioProcessor.release_cached_models()
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -139,7 +294,7 @@ class HyperTranscriptionEngine:
     def _get_base_dir(self):
         if getattr(sys, "frozen", False):
             return os.path.dirname(sys.executable)
-        return os.path.dirname(os.path.abspath(__file__))
+        return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     def _resolve_model_id(self, model_id):
         if not model_id:
@@ -395,15 +550,21 @@ class HyperTranscriptionEngine:
             print(f"[INFO] Using whisper.cpp Core ML backend: {model_path}")
         return self.whispercpp_model
 
-    def _transcribe_with_coreml(self, audio_chunk, selected_lang, use_word_timestamps):
+    def _transcribe_with_coreml(self, audio_chunk, selected_lang, use_word_timestamps, use_worker=False):
+        if os.environ.get("VIBE_COREML_CHILD") == "1":
+            return self._transcribe_with_coreml_local(audio_chunk, selected_lang, use_word_timestamps)
+        if use_worker:
+            return self._transcribe_with_coreml_subprocess(audio_chunk, selected_lang, use_word_timestamps)
+        return self._transcribe_with_coreml_local(audio_chunk, selected_lang, use_word_timestamps)
+
+    def _transcribe_with_coreml_local(self, audio_chunk, selected_lang, use_word_timestamps):
         model = self._get_whispercpp_model("coreml")
         params = {
             "language": selected_lang or "auto",
             "translate": False,
-            "token_timestamps": False,
             "max_len": 0,
         }
-        segments = model.transcribe(np.asarray(audio_chunk, dtype=np.float32), **params)
+        segments = model.transcribe(np.asarray(audio_chunk, dtype=np.float32), token_timestamps=False, **params)
         runtime_segments = []
         for seg in segments:
             text = (seg.text or "").strip()
@@ -417,7 +578,114 @@ class HyperTranscriptionEngine:
                     words=[],
                 )
             )
+
+        if not use_word_timestamps or not runtime_segments:
+            return runtime_segments
+
+        # whisper.cpp CoreML 경로는 기본 세그먼트 결과에 단어 배열을 바로 주지 않으므로
+        # token_timestamps + split_on_word + max_len=1 조합으로 word-like segments를 한 번 더 뽑아 words를 채운다.
+        word_segments = model.transcribe(
+            np.asarray(audio_chunk, dtype=np.float32),
+            language=selected_lang or "auto",
+            translate=False,
+            token_timestamps=True,
+            split_on_word=True,
+            max_len=1,
+        )
+        runtime_words = []
+        for seg in word_segments:
+            text = (seg.text or "").strip()
+            if not text:
+                continue
+            start = float(seg.t0) / 100.0
+            end = float(seg.t1) / 100.0
+            if end <= start:
+                continue
+            runtime_words.append(RuntimeWord(word=text, start=start, end=end))
+
+        if not runtime_words:
+            return runtime_segments
+
+        word_idx = 0
+        epsilon = 0.05
+        for seg in runtime_segments:
+            seg_words = []
+            while word_idx < len(runtime_words) and runtime_words[word_idx].end <= seg.start - epsilon:
+                word_idx += 1
+
+            scan_idx = word_idx
+            while scan_idx < len(runtime_words):
+                word = runtime_words[scan_idx]
+                if word.start >= seg.end + epsilon:
+                    break
+                mid = (word.start + word.end) / 2.0
+                if (seg.start - epsilon) <= mid <= (seg.end + epsilon):
+                    seg_words.append(word)
+                scan_idx += 1
+
+            seg.words = seg_words
         return runtime_segments
+
+    def _transcribe_with_coreml_subprocess(self, audio_chunk, selected_lang, use_word_timestamps):
+        worker_python = os.path.join(self.base_dir, ".venv", "bin", "python")
+        if not os.path.isfile(worker_python):
+            worker_python = sys.executable
+        worker_script = os.path.join(self.base_dir, "tools", "coreml_transcribe_worker.py")
+        if not os.path.isfile(worker_script):
+            raise RuntimeError(f"CoreML worker script is missing: {worker_script}")
+
+        temp_dir = tempfile.mkdtemp(prefix="vibe_coreml_worker_")
+        input_path = os.path.join(temp_dir, "audio.npy")
+        output_path = os.path.join(temp_dir, "segments.json")
+        np.save(input_path, np.asarray(audio_chunk, dtype=np.float32))
+
+        cmd = [worker_python, worker_script, "--model-id", self.model_id, "--input", input_path, "--output", output_path]
+        if selected_lang:
+            cmd.extend(["--language", selected_lang])
+        if use_word_timestamps:
+            cmd.append("--word-timestamps")
+
+        env = os.environ.copy()
+        existing_pythonpath = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = self.base_dir if not existing_pythonpath else f"{self.base_dir}{os.pathsep}{existing_pythonpath}"
+        env["VIBE_COREML_CHILD"] = "1"
+
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=self.base_dir,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env,
+                check=False,
+            )
+            if proc.returncode != 0:
+                raise RuntimeError((proc.stderr or "").strip() or f"CoreML worker exited with code {proc.returncode}")
+            with open(output_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            runtime_segments = []
+            for seg in payload:
+                words = [
+                    RuntimeWord(
+                        word=w.get("word", ""),
+                        start=float(w.get("start", 0.0)),
+                        end=float(w.get("end", 0.0)),
+                    )
+                    for w in seg.get("words", [])
+                    if w.get("word")
+                ]
+                runtime_segments.append(
+                    RuntimeSegment(
+                        text=seg.get("text", ""),
+                        start=float(seg.get("start", 0.0)),
+                        end=float(seg.get("end", 0.0)),
+                        words=words,
+                    )
+                )
+            return runtime_segments
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     def set_model_id(self, new_model_id):
         if self.model_id != new_model_id:
@@ -510,6 +778,9 @@ class HyperTranscriptionEngine:
     def denoise_audio(self, audio_data):
         return AudioProcessor.denoise_audio(audio_data)
 
+    def separate_vocals_demucs(self, audio_data):
+        return AudioProcessor.separate_vocals_demucs(audio_data)
+
     def filter_dominant_speaker(self, audio_data, segments):
         return AudioProcessor.filter_dominant_speaker(audio_data, segments)
 
@@ -530,6 +801,7 @@ class HyperTranscriptionEngine:
         
         beam_size = options.beam_size
         use_denoise = options.use_denoise
+        use_demucs = getattr(options, "use_demucs", False)
         use_dominant = options.use_dominant
         selected_lang = options.language
         if selected_lang == "auto": selected_lang = None
@@ -540,33 +812,15 @@ class HyperTranscriptionEngine:
         use_word_timestamps = options.use_word_timestamps
         use_whisper_vad = options.use_whisper_vad
         use_silero_vad = options.use_silero_vad
-        use_start_time_trim = getattr(options, "use_start_time_trim", False)
+        use_coreml_worker = getattr(options, "use_coreml_worker", False)
         runtime_whisper_vad = {"enabled": use_whisper_vad}
         use_whisperx_align = options.use_whisperx_align
-        filler_words = {"어", "음", "아", "으", "에", "이", "오", "우", "그", "저", "뭐", "막", "좀", "그냥"}
+        use_whisperx_short_fallback = getattr(options, "use_whisperx_short_fallback", False)
+        use_gemma4_mlx_filter = getattr(options, "use_gemma4_mlx_filter", False)
+        use_word_timestamps = use_word_timestamps or use_whisperx_align or use_whisperx_short_fallback
 
-        def _trim_segment_start(segment):
-            if not isinstance(segment, TranscriptSegment) or not segment.words:
-                return segment
-            original_start = float(segment.s)
-            first_valid_start = None
-            for word in segment.words:
-                token = re.sub(r'[\s.,\-~]+', '', getattr(word, "word", ""))
-                if not token:
-                    continue
-                if token in filler_words:
-                    continue
-                try:
-                    first_valid_start = float(word.s)
-                except Exception:
-                    first_valid_start = None
-                break
-            if first_valid_start is None:
-                return segment
-            if first_valid_start - original_start > 1.5:
-                return segment
-            segment.s = max(original_start, first_valid_start)
-            return segment
+        if use_demucs:
+            audio_data = self.separate_vocals_demucs(audio_data)
 
         # 소음 제거 적용
         if use_denoise:
@@ -633,7 +887,7 @@ class HyperTranscriptionEngine:
                             
                         try:
                             if self._use_coreml_backend(device_mode):
-                                segs_list = self._transcribe_with_coreml(sub_chunk, selected_lang, use_word_timestamps)
+                                segs_list = self._transcribe_with_coreml(sub_chunk, selected_lang, use_word_timestamps, use_worker=use_coreml_worker)
                             elif self._use_torch_whisper_backend(device_mode):
                                 segs_list = self._transcribe_with_torch_whisper(sub_chunk, selected_lang, use_word_timestamps)
                             else:
@@ -734,7 +988,15 @@ class HyperTranscriptionEngine:
                                             new_words_data.append({"word": w_word, "start": w_start, "end": w_end})
                                             last_processed_e = w_end
                                         
-                                        new_segs.append(_CTCAlignedSeg(seg_dict, new_words_data))
+                                        aligned_seg = _CTCAlignedSeg(seg_dict, new_words_data)
+                                        if (
+                                            use_whisperx_short_fallback
+                                            and orig_seg is not None
+                                            and self._should_fallback_short_whisperx_segment(orig_seg, aligned_seg)
+                                        ):
+                                            new_segs.append(orig_seg)
+                                        else:
+                                            new_segs.append(aligned_seg)
 
                                     if len(aligned_segments) < len(segs_list):
                                         new_segs.extend(segs_list[len(aligned_segments):])
@@ -744,6 +1006,9 @@ class HyperTranscriptionEngine:
                                     
                             except Exception as e:
                                 print(f"[WARN] WhisperX alignment 전체 실패, 기존 결과 유지: {e}")
+
+                        if use_gemma4_mlx_filter and segs_list:
+                            segs_list = self._filter_segments_with_gemma4_mlx(segs_list)
                         
                         sub_max_time = vad_e - vad_s
                         offset_vad = offset + vad_s
@@ -826,7 +1091,15 @@ class HyperTranscriptionEngine:
                                 for ex in extracted: extracted_results.append(ex)
                             else:
                                 c_s, c_e = min(seg_s, sub_max_time), min(seg_e, sub_max_time)
-                                if c_e > c_s: extracted_results.append(TranscriptSegment(s=offset_vad + c_s, e=min(offset_vad + c_e, total_dur), t=text, words=[TranscriptWord(word=text, s=offset_vad + c_s, e=min(offset_vad + c_e, total_dur))]))
+                                if c_e > c_s:
+                                    extracted_results.append(
+                                        TranscriptSegment(
+                                            s=offset_vad + c_s,
+                                            e=min(offset_vad + c_e, total_dur),
+                                            t=text,
+                                            words=[],
+                                        )
+                                    )
                                 
                         return extracted_results
 
@@ -886,18 +1159,15 @@ class HyperTranscriptionEngine:
                                 if len(regen_clean) > 0 and (len(set(regen_clean)) / len(regen_clean) > 0.4):
                                     if isinstance(r, TranscriptSegment):
                                         r.t = regen_t
-                                        r.words = [TranscriptWord(word=regen_t, s=r_s, e=r_e)]
-                                        if use_start_time_trim:
-                                            r = _trim_segment_start(r)
+                                        r.words = []
                                     else:
                                         r['t'] = regen_t
-                                        r['words'] = [{'word': regen_t, 's': r_s, 'e': r_e}]
+                                        r['words'] = []
                                     yield r
                             continue # 재생성도 실패하거나 못 살리면 최종적으로 버림 (Drop)
-                        
-                        if isinstance(r, dict) and 'words' not in r: r['words'] = [{'word': r['t'], 's': r['s'], 'e': r['e']}]
-                        if use_start_time_trim and isinstance(r, TranscriptSegment):
-                            r = _trim_segment_start(r)
+
+                        if isinstance(r, dict) and 'words' not in r:
+                            r['words'] = []
                         yield r
                 
                 gc.collect()

@@ -1,11 +1,11 @@
 import tkinter as tk
 import unittest
 
-from gui_app import CustomModelApp
-from timeline_manager import TranscriptManager
-from ui_block_editor import UIBlockEditor
-from subtitle_cues import build_subtitle_cues, remap_cues_for_merged_ranges, SubtitleRenderStyle, cues_to_srt, cues_to_vtt
-from video_editor import VideoEditor
+from app.ui.gui_app import CustomModelApp
+from app.core.timeline_manager import TranscriptManager
+from app.ui.ui_block_editor import UIBlockEditor
+from app.core.subtitle_cues import build_subtitle_cues, remap_cues_for_merged_ranges, SubtitleRenderStyle, cues_to_srt, cues_to_vtt
+from app.media.video_editor import VideoEditor
 
 
 class DummyPlayer:

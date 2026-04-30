@@ -9,7 +9,7 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-from engine_core import HyperTranscriptionEngine
+from app.engine.engine_core import HyperTranscriptionEngine
 
 
 def main():

@@ -1,7 +1,7 @@
 import time
 import threading
 import gc
-from config_models import TranscriptSegment, TranscriptWord
+from app.core.config_models import TranscriptSegment, TranscriptWord
 
 class AnalysisController:
     """[시니어 컨트롤러] 엔진의 분석 루프와 렌더링 작업을 주관하는 컨트롤러 (GUI와 비동기 로직 분리)"""

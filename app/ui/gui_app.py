@@ -6,16 +6,23 @@ import tkinter as tk
 from tkinter import colorchooser, filedialog, messagebox, ttk, font as tkfont
 import numpy as np
 import vlc
-from engine_core import HyperTranscriptionEngine, HAS_WHISPERX
-from video_editor import VideoEditor
-from video_player import VideoPlayer
-from config_models import AnalysisSettings
-from config_models import AnalysisSettings
-from timeline_manager import TranscriptManager
-from event_dispatcher import EventEmitter
-from analysis_controller import AnalysisController
-from ui_block_editor import UIBlockEditor
-from transcription_backends import BACKEND_LABELS, mode_from_label
+from app.engine.engine_core import HyperTranscriptionEngine, HAS_WHISPERX
+from app.media.video_editor import VideoEditor
+from app.ui.video_player import VideoPlayer
+from app.core.config_models import AnalysisSettings
+from app.core.timeline_manager import TranscriptManager
+from app.core.event_dispatcher import EventEmitter
+from app.engine.analysis_controller import AnalysisController
+from app.ui.ui_block_editor import UIBlockEditor
+from app.core.transcription_backends import BACKEND_LABELS, mode_from_label
+from app.core.subtitle_cues import (
+    SubtitleRenderStyle,
+    build_subtitle_cues,
+    cues_to_entries,
+    cues_to_srt,
+    cues_to_vtt,
+    remap_cues_for_merged_ranges,
+)
 
 AI_MODEL_OPTIONS = (
     ("large-v3-turbo (기본)", "large-v3-turbo"),
@@ -110,6 +117,62 @@ class CustomModelApp:
             cb(percent, message)
         except Exception:
             pass
+
+    def _get_subtitle_entries_no_overlap(self, use_display_start=False):
+        return cues_to_entries(build_subtitle_cues(self.results_data))
+
+    def _get_subtitle_render_style(self):
+        return SubtitleRenderStyle(
+            font_name=self.sub_font.get() if hasattr(self, "sub_font") else "맑은 고딕",
+            font_size=self.sub_font_size.get() if hasattr(self, "sub_font_size") else 80,
+            fill_color=self.sub_color_f.get() if hasattr(self, "sub_color_f") else "#FFFFFF",
+            outline_width=self.sub_outline.get() if hasattr(self, "sub_outline") else 3,
+            outline_color=self.sub_color_o.get() if hasattr(self, "sub_color_o") else "#000000",
+            shadow_width=self.sub_shadow.get() if hasattr(self, "sub_shadow") else 3,
+            shadow_color=self.sub_color_s.get() if hasattr(self, "sub_color_s") else "#000000",
+            margin_v=self.sub_y_pos.get() if hasattr(self, "sub_y_pos") else 50,
+        )
+
+    def _get_live_overlay_entry(self, curr_sec):
+        for entry in self._get_subtitle_entries_no_overlap(use_display_start=True):
+            if entry["s"] <= curr_sec <= entry["e"]:
+                return entry
+        return None
+
+    def _hex_to_vlc_color(self, hex_color):
+        color = str(hex_color or "#FFFFFF").lstrip("#")
+        if len(color) != 6:
+            return 0xFFFFFF
+        return int(color, 16)
+
+    def _apply_live_overlay_for_time(self, curr_sec, force=False):
+        if not self.player:
+            return
+        entry = self._get_live_overlay_entry(curr_sec)
+        text = (entry["t"] if entry else "").strip() if entry else ""
+        style = {
+            "text": text,
+            "size": self.sub_font_size.get() if hasattr(self, "sub_font_size") else 80,
+            "color": self._hex_to_vlc_color(self.sub_color_f.get() if hasattr(self, "sub_color_f") else "#FFFFFF"),
+            "margin_v": self.sub_y_pos.get() if hasattr(self, "sub_y_pos") else 50,
+        }
+        if not hasattr(self, "_live_overlay_cache"):
+            self._live_overlay_cache = {}
+        if not force and style == self._live_overlay_cache:
+            return
+        if style["text"]:
+            self.player.set_live_subtitle(
+                style["text"],
+                size=style["size"],
+                color=style["color"],
+                opacity=255,
+                margin_v=style["margin_v"],
+                font_name=self.sub_font.get() if hasattr(self, "sub_font") else "맑은 고딕",
+            )
+        else:
+            self.player.clear_live_subtitle()
+        self._live_overlay_cache = style.copy()
+
     def __init__(self, root, startup_progress=None):
         self.root = root
         self._startup_progress_cb = startup_progress
@@ -135,6 +198,13 @@ class CustomModelApp:
             'teal':     '#5AC8FA',  # System Teal
         }
         C = self.C
+
+        # 드롭다운 팝업이 시스템 기본색을 타더라도 흰 배경에서는 검은 글자 유지
+        self.root.option_add('*TCombobox*Listbox.background', C['bg2'])
+        self.root.option_add('*TCombobox*Listbox.foreground', C['text'])
+        self.root.option_add('*TCombobox*Listbox.selectBackground', C['accent'])
+        self.root.option_add('*TCombobox*Listbox.selectForeground', '#FFFFFF')
+        self.root.option_add('*TCombobox*Listbox.font', 'Noto Sans KR 10')
         
         # [Apple HIG] ttk 스타일 테마
         style = ttk.Style()
@@ -181,13 +251,18 @@ class CustomModelApp:
         self._live_preview_segment_limit = 250
         self._block_render_after_id = None
         self._preview_after_id = None
+        self.use_live_overlay_preview = True
+        self._live_overlay_cache = {}
         self.transcript_manager = TranscriptManager()
         self.current_video_path = None
         self.is_seeking = False
         self.ICON_PLAY = chr(9654); self.ICON_PAUSE = chr(9208)
         self.dispatcher = EventEmitter()
         # [시니어] 앱의 실행 경로 정밀 추적 (System32 등 엉뚱한 CWD 방어)
-        self.base_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+        if getattr(sys, "frozen", False):
+            self.base_dir = os.path.dirname(sys.executable)
+        else:
+            self.base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         self.controller = AnalysisController(self.engine, self.video_editor, self.transcript_manager, self.dispatcher)
         self._report_startup_progress(50, "Building interface...")
         self.setup_ui()
@@ -211,14 +286,7 @@ class CustomModelApp:
         try:
             import glob
             import shutil
-            # 1. Remove temporary ASS subtitle files.
-            for f in glob.glob(os.path.join(self.base_dir, "export_burn_*.ass")):
-                try:
-                    os.remove(f)
-                except OSError:
-                    pass
-
-            # 2. Remove temporary working folders.
+            # Remove temporary working folders.
             for d in glob.glob(os.path.join(self.base_dir, "temp_fast_*")):
                 try:
                     shutil.rmtree(d, ignore_errors=True)
@@ -262,6 +330,7 @@ class CustomModelApp:
     def bind_events(self):
         self.dispatcher.on("progress", lambda x: self._queue_ui(lambda: self._on_progress(x)))
         self.dispatcher.on("add_row", lambda x: self._queue_ui(lambda: self._on_add_row(x)))
+        self.dispatcher.on("update_row", lambda x: self._queue_ui(lambda: self._on_update_row(x)))
         self.dispatcher.on("complete", lambda x: self._queue_ui(lambda: self._on_complete(x)))
         self.dispatcher.on("message", lambda x: self._queue_ui(lambda: messagebox.showinfo("Done", x["text"])))
         self.dispatcher.on("error", lambda x: self._queue_ui(lambda: self._on_error(x)))
@@ -306,6 +375,17 @@ class CustomModelApp:
                 self._schedule_block_render(delay_ms=250)
             
         # [사용자 요청] 분석 중 생성되는 자막을 영상에 실시간으로 입힘 (디바운스로 부하 제어)
+        if (not self._analysis_in_progress) or len(self.results_data) <= self._live_preview_segment_limit:
+            self._schedule_preview_reload(force_reload=False, delay_ms=1000 if self._analysis_in_progress else 500)
+
+    def _on_update_row(self, task):
+        children = self.tree.get_children("")
+        idx = int(task["i"]) - 1
+        if 0 <= idx < len(children):
+            self.tree.item(children[idx], values=(task["i"], self.format_time(task['s']), self.format_time(task['e']), task['t']))
+        if hasattr(self, 'block_editor'):
+            if (not self._analysis_in_progress) or len(self.results_data) <= self._live_block_render_limit:
+                self._schedule_block_render(delay_ms=250)
         if (not self._analysis_in_progress) or len(self.results_data) <= self._live_preview_segment_limit:
             self._schedule_preview_reload(force_reload=False, delay_ms=1000 if self._analysis_in_progress else 500)
         
@@ -518,7 +598,8 @@ class CustomModelApp:
         self.progress_var = tk.DoubleVar(); ttk.Progressbar(c2, variable=self.progress_var).pack(fill=tk.X, pady=(4,0))
         self.use_burn_sub_var = tk.BooleanVar(value=False)
         self.save_frame = tk.Frame(c2, bg=C['bg2']); self.save_frame.pack(fill=tk.X, pady=4); self.save_frame.pack_forget()
-        tk.Checkbutton(self.save_frame, text='🔥 영상에 자막 입히기 (Re-encode)', variable=self.use_burn_sub_var, bg=C['bg2'], selectcolor=C['bg3'], activebackground=C['bg2'], font=_f, relief=tk.FLAT, bd=0).pack(anchor=tk.W, pady=(0, 4))
+        self.use_burn_sub_chk = tk.Checkbutton(self.save_frame, text='🔥 영상에 자막 입히기 (Re-encode)', variable=self.use_burn_sub_var, bg=C['bg2'], fg=C['text'], selectcolor=C['bg3'], activebackground=C['bg2'], activeforeground=C['text'], disabledforeground=C['text2'], font=_f, relief=tk.FLAT, bd=0)
+        self.use_burn_sub_chk.pack(anchor=tk.W, pady=(0, 4))
         btn_box = tk.Frame(self.save_frame, bg=C['bg2']); btn_box.pack(fill=tk.X)
         self.btn_fast_save = tk.Button(btn_box, text='  🚀 초고속 렌더링  ', command=lambda: self.start_export(fast=True), bg=C['purple'], fg='white', font=_f, relief='flat', bd=0, compound='center', pady=6, cursor='hand2'); self.btn_fast_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0,2)); _hover(self.btn_fast_save, C['purple'], '#9342B5')
         self.btn_pro_save = tk.Button(btn_box, text='  🎯 정밀 렌더링  ', command=lambda: self.start_export(fast=False), bg=C['bg3'], fg=C['text'], font=_f, relief='flat', bd=0, compound='center', pady=6, cursor='hand2'); self.btn_pro_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2,0)); _hover(self.btn_pro_save, C['bg3'], C['border'])
@@ -528,21 +609,19 @@ class CustomModelApp:
         
         # [내부 고정 값] 빔 사이즈 5, 소음 제거/주인공 기능 UI 제거 (사용자 요청)
         self.beam_size_var = tk.IntVar(value=5)
-        self.use_denoise_var = tk.BooleanVar(value=False)
         self.use_dominant_var = tk.BooleanVar(value=False)
         
-        chk_cfg = dict(bg=C['bg2'], selectcolor=C['bg3'], activebackground=C['bg2'], font=_f, relief=tk.FLAT, bd=0)
+        chk_cfg = dict(bg=C['bg2'], selectcolor=C['bg3'], activebackground=C['bg2'], activeforeground=C['text'], disabledforeground=C['text2'], font=_f, relief=tk.FLAT, bd=0)
         self.remove_punctuation_var = tk.BooleanVar(value=True); tk.Checkbutton(c3, text='✂️문장부호 제거', variable=self.remove_punctuation_var, fg=C['text2'], **chk_cfg).pack(anchor=tk.W, pady=1)
+        self.use_denoise_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🧪 배경음 줄이기 (실험)', variable=self.use_denoise_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
+        self.use_demucs_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🧪 배경음 분리 (Demucs 실험)', variable=self.use_demucs_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
+        self.use_coreml_worker_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🧪 CoreML 메모리 절약 모드 (실험)', variable=self.use_coreml_worker_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
+        self.use_gemma4_mlx_filter_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🧪 Gemma 4 이상 세그먼트 필터 (MLX)', variable=self.use_gemma4_mlx_filter_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         _sep(c3)
         self.use_silero_vad_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='외부 VAD (Silero)', variable=self.use_silero_vad_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         self.use_whisper_vad_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='내부 VAD (Whisper)', variable=self.use_whisper_vad_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         self.use_whisperx_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🎯 WhisperX 단어 싱크 보정', variable=self.use_whisperx_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
-        
-        def _check_whisperx(*_):
-            if self.use_whisperx_var.get():
-                messagebox.showinfo("알림", "아직 지원하지 않는 기능입니다!")
-                self.use_whisperx_var.set(False)
-        self.use_whisperx_var.trace_add('write', _check_whisperx)
+        self.use_whisperx_short_fallback_var = tk.BooleanVar(value=False); tk.Checkbutton(c3, text='🧪 WhisperX 짧은 대사 원본 유지', variable=self.use_whisperx_short_fallback_var, fg=C['text'], **chk_cfg).pack(anchor=tk.W, pady=1)
         _sep(c3)
         
         r = _row(c3); tk.Label(r, text='무음 길이', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
@@ -552,11 +631,18 @@ class CustomModelApp:
         self.speech_pad_var = tk.DoubleVar(value=0.1); tk.Entry(r, textvariable=self.speech_pad_var, width=5, bg=C['bg3'], fg=C['text'], insertbackground=C['text'], relief=tk.FLAT, font=_f).pack(side=tk.RIGHT)
         
         r = _row(c3); tk.Label(r, text='VAD 임계', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
-        self.vad_threshold_var = tk.DoubleVar(value=0.35); tk.Scale(r, from_=0.1, to=0.9, resolution=0.05, orient=tk.HORIZONTAL, variable=self.vad_threshold_var, showvalue=1, length=120, bg=C['bg2'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.RIGHT)
+        self.vad_threshold_var = tk.DoubleVar(value=0.35)
+        self.vad_threshold_text = tk.StringVar(value="0.35")
+        tk.Label(r, textvariable=self.vad_threshold_text, width=5, anchor=tk.E, bg=C['bg2'], fg=C['text'], font=_f).pack(side=tk.RIGHT)
+        tk.Scale(r, from_=0.1, to=0.9, resolution=0.05, orient=tk.HORIZONTAL, variable=self.vad_threshold_var, showvalue=0, length=120, bg=C['bg2'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.RIGHT, padx=(0, 8))
+        self.vad_threshold_var.trace_add('write', lambda *_: self.vad_threshold_text.set(f"{self.vad_threshold_var.get():.2f}"))
         
         r = _row(c3); tk.Label(r, text='대사 길이', bg=C['bg2'], fg=C['text2'], font=_f).pack(side=tk.LEFT)
         self.max_len_int = tk.IntVar(value=20)
-        tk.Scale(r, from_=10, to=50, orient=tk.HORIZONTAL, variable=self.max_len_int, showvalue=1, length=120, bg=C['bg2'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.RIGHT)
+        self.max_len_text = tk.StringVar(value="20")
+        tk.Label(r, textvariable=self.max_len_text, width=4, anchor=tk.E, bg=C['bg2'], fg=C['text'], font=_f).pack(side=tk.RIGHT)
+        tk.Scale(r, from_=10, to=50, orient=tk.HORIZONTAL, variable=self.max_len_int, showvalue=0, length=120, bg=C['bg2'], highlightthickness=0, troughcolor=C['bg3'], sliderrelief=tk.FLAT).pack(side=tk.RIGHT, padx=(0, 8))
+        self.max_len_int.trace_add('write', lambda *_: self.max_len_text.set(str(self.max_len_int.get())))
         
         # [사용자 요청] ── 자막 설정 (스타일) 탭 UI 통합 구현 ──
         cs = self.tab_style
@@ -672,26 +758,66 @@ class CustomModelApp:
                         # 휠 방향 반전: 위로(delta>0) 올리면 시간 감소(-), 아래로(delta<0) 내리면 시간 증가(+)
                         delta = -0.05 if e.delta > 0 else 0.05
                         key = 's' if col == '#2' else 'e'
+                        link_adjacent = bool(e.state & 0x8 or e.state & 0x10)
+                        updated_idxs = [idx]
                         nv = max(0, self.results_data[idx][key] + delta)
-                        
+
                         # 안전장치 및 차단 로직
                         valid = True
-                        if key == 's':
+                        if link_adjacent and key == 'e' and idx < len(self.results_data) - 1:
+                            if nv <= self.results_data[idx]['s'] or nv >= self.results_data[idx + 1]['e']:
+                                valid = False
+                        elif link_adjacent and key == 's' and idx > 0:
+                            if nv <= self.results_data[idx - 1]['s'] or nv >= self.results_data[idx]['e']:
+                                valid = False
+                        elif key == 's':
                             if nv >= self.results_data[idx]['e'] or (idx > 0 and nv < self.results_data[idx-1]['e']): valid = False
                         else: # key == 'e'
                             if nv <= self.results_data[idx]['s'] or (idx < len(self.results_data)-1 and nv > self.results_data[idx+1]['s']): valid = False
-                        
+
                         if valid:
                             self.transcript_manager.save_state()
-                            self.results_data[idx][key] = round(nv, 3)
-                            
-                            # [시니어 최적화] 내부 단어 타임스탬프 동기화 (Word Block 뷰와 일관성 유지)
-                            words = self.results_data[idx].get('words', [])
-                            if words:
-                                if key == 's': words[0]['s'] = nv
-                                else: words[-1]['e'] = nv
+                            if link_adjacent and key == 'e' and idx < len(self.results_data) - 1:
+                                self.results_data[idx]['e'] = round(nv, 3)
+                                self.results_data[idx]['_manual_end_timing'] = True
+                                self.results_data[idx + 1]['s'] = round(nv, 3)
+                                self.results_data[idx + 1]['_manual_start_timing'] = True
+                                updated_idxs = [idx, idx + 1]
+                                words = self.results_data[idx].get('words', [])
+                                if words:
+                                    words[-1]['e'] = nv
+                                next_words = self.results_data[idx + 1].get('words', [])
+                                if next_words:
+                                    next_words[0]['s'] = nv
+                            elif link_adjacent and key == 's' and idx > 0:
+                                self.results_data[idx]['s'] = round(nv, 3)
+                                self.results_data[idx]['_manual_start_timing'] = True
+                                self.results_data[idx - 1]['e'] = round(nv, 3)
+                                self.results_data[idx - 1]['_manual_end_timing'] = True
+                                updated_idxs = [idx - 1, idx]
+                                words = self.results_data[idx].get('words', [])
+                                if words:
+                                    words[0]['s'] = nv
+                                prev_words = self.results_data[idx - 1].get('words', [])
+                                if prev_words:
+                                    prev_words[-1]['e'] = nv
+                            else:
+                                self.results_data[idx][key] = round(nv, 3)
+                                if key == 's':
+                                    self.results_data[idx]['_manual_start_timing'] = True
+                                else:
+                                    self.results_data[idx]['_manual_end_timing'] = True
 
-                            self.tree.set(item, column=col, value=self.format_time(nv))
+                                # [시니어 최적화] 내부 단어 타임스탬프 동기화 (Word Block 뷰와 일관성 유지)
+                                words = self.results_data[idx].get('words', [])
+                                if words:
+                                    if key == 's': words[0]['s'] = nv
+                                    else: words[-1]['e'] = nv
+
+                            if link_adjacent and len(updated_idxs) > 1:
+                                self.rebuild_tree_and_render(fast=True)
+                            else:
+                                self.tree.set(item, column=col, value=self.format_time(nv))
                             self.player.set_time(int(nv * 1000))
                             self.player.play()
                             self.apply_preview_subtitles(force_reload=True)
@@ -864,17 +990,13 @@ class CustomModelApp:
             self.block_editor.render_block_view()
 
     def apply_vlc_sub_settings(self):
-        """[ASS 핫스왓] 디자인 변경 시 ASS 파일만 재생성하여 VLC에 즉시 로드"""
+        """디자인 변경 시 live overlay 자막을 즉시 갱신"""
         self.apply_preview_subtitles(force_reload=False)
 
     def on_select_video(self):
         p = filedialog.askopenfilename(filetypes=[("Video files", "*.mp4 *.avi *.mkv *.mov *.flv")])
         if p:
             self.current_video_path = p
-
-            # 기존에 로드된 자막 파일 연결 끊기
-            if hasattr(self, 'preview_srt_path'):
-                self.preview_srt_path = None
 
             def _load_selected_video():
                 try:
@@ -900,9 +1022,6 @@ class CustomModelApp:
                     
                     self.lbl_status.config(text="영상 로드됨: " + os.path.basename(p), fg=self.C['accent'])
                     self.reset_action_button()
-                    
-                    if hasattr(self, 'preview_srt_path') and getattr(self, 'preview_srt_path') and os.path.exists(self.preview_srt_path):
-                        self.root.after(300, self.apply_preview_subtitles)
                 else:
                     from tkinter import messagebox
                     messagebox.showerror("Error", "영상을 불러올 수 없습니다.")
@@ -935,19 +1054,28 @@ class CustomModelApp:
         device_val = self.device_var.get()
         mapped_dev = mode_from_label(device_val)
 
+        use_whisperx_align = getattr(self, 'use_whisperx_var', tk.BooleanVar(value=False)).get()
+        use_whisperx_short_fallback = getattr(self, 'use_whisperx_short_fallback_var', tk.BooleanVar(value=False)).get()
+        # 기본 분석은 빠른 1차 전사만 사용하고, 정밀 싱크가 필요할 때만 단어 타임스탬프를 켠다.
+        use_word_timestamps = use_whisperx_align or use_whisperx_short_fallback
+
         analysis_options = AnalysisSettings(
             beam_size=self.beam_size_var.get(),
             use_denoise=self.use_denoise_var.get(),
+            use_demucs=getattr(self, 'use_demucs_var', tk.BooleanVar(value=False)).get(),
             use_dominant=self.use_dominant_var.get(),
             language=self.lang_var.get().split("(")[-1].replace(")", "").strip(),
             vad_threshold=self.vad_threshold_var.get(),
             min_silence_ms=min_sil_ms,
             speech_pad_ms=pad_ms,
-            use_word_timestamps=True,
+            use_word_timestamps=use_word_timestamps,
             use_whisper_vad=self.use_whisper_vad_var.get(),
             use_silero_vad=self.use_silero_vad_var.get(),
-            use_whisperx_align=getattr(self, 'use_whisperx_var', tk.BooleanVar(value=False)).get(),
+            use_whisperx_align=use_whisperx_align,
+            use_whisperx_short_fallback=use_whisperx_short_fallback,
+            use_gemma4_mlx_filter=getattr(self, 'use_gemma4_mlx_filter_var', tk.BooleanVar(value=False)).get(),
             remove_punctuation=getattr(self, 'remove_punctuation_var', tk.BooleanVar(value=False)).get(),
+            use_coreml_worker=getattr(self, 'use_coreml_worker_var', tk.BooleanVar(value=False)).get(),
             device_mode=mapped_dev
         )
         
@@ -969,70 +1097,20 @@ class CustomModelApp:
             self.btn_stop.config(state=tk.NORMAL); self.progress_var.set(0)
             
             # [시니어] 자막 합치기(Burn) 옵션 처리
-            ass_path_final = None
+            burn_payload = None
             if self.use_burn_sub_var.get():
                 try:
-                    # 1. 병합 세그먼트 정보 계산
                     merged, _ = self.video_editor.get_merged_segments_info(self.results_data)
-                    
-                    # 2. ASS 스타일/헤더 정보 수집 (apply_preview_subtitles 로직 재사용)
-                    # --- HEX(#RRGGBB) → ASS(&H00BBGGRR&) 변환 ---
-                    def hex_to_ass(hex_color):
-                        hex_color = hex_color.lstrip('#')
-                        r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
-                        return f"&H00{b:02X}{g:02X}{r:02X}&"
-                    
-                    font_name = self.sub_font.get() if hasattr(self, 'sub_font') else '맑은 고딕'
-                    font_size = self.sub_font_size.get() if hasattr(self, 'sub_font_size') else 40
-                    ass_primary = hex_to_ass(self.sub_color_f.get() if hasattr(self, 'sub_color_f') else '#ffffff')
-                    ass_outline = hex_to_ass(self.sub_color_o.get() if hasattr(self, 'sub_color_o') else '#000000')
-                    ass_shadow = hex_to_ass(self.sub_color_s.get() if hasattr(self, 'sub_color_s') else '#000000')
-                    outline_w = self.sub_outline.get() if hasattr(self, 'sub_outline') else 3
-                    shadow_w = self.sub_shadow.get() if hasattr(self, 'sub_shadow') else 3
-                    margin_v = self.sub_y_pos.get() if hasattr(self, 'sub_y_pos') else 50
-                    
-                    ass_header = f"""[Script Info]\nTitle: Export\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,{font_name},{font_size},{ass_primary},&H000000FF&,{ass_outline},{ass_shadow},-1,0,0,0,100,100,0,0,1,{outline_w},{shadow_w},2,10,10,{margin_v},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"""
-                    
-                    def fmt_ass_time(sec):
-                        h, m, s, cs = int(sec//3600), int((sec%3600)//60), int(sec%60), int((sec%1)*100)
-                        return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
-
-                    # 필러 처리 로직 (apply_preview_subtitles 에 추가한 것과 동일)
-                    _FILLERS = {'어', '음', '아', '으', '에', '이', '오', '우', '그', '저', '뭐', '막', '좀', '그냥'}
-                    def _get_display_start(r):
-                        words = r.get('words', [])
-                        if not words: return r['s']
-                        for w in words:
-                            wt = w['word'].strip() if isinstance(w, dict) else w.word.strip()
-                            wclean = wt.replace(' ', '').replace('.', '').replace(',', '').replace('-', '').replace('~', '')
-                            if not wclean: continue
-                            if wclean in _FILLERS or (len(wclean) <= 3 and len(set(wclean)) <= 1): continue
-                            ws = w['s'] if isinstance(w, dict) else w.s
-                            if ws - r['s'] > 1.5: return r['s']
-                            return ws
-                        return r['s']
-
-                    # 3. 타임라인 매핑 (Cut 영상에 맞게 자막 시간 이동)
-                    lines = []
-                    current_out_time = 0.0
-                    for m_start, m_end in merged:
-                        for r in self.results_data:
-                            # 세그먼트가 이 병합 구간 안에 있는지 확인
-                            if r['s'] >= m_start - 0.001 and r['e'] <= m_end + 0.001:
-                                rel_s = _get_display_start(r) - m_start # 필러 보정 포함
-                                rel_e = r['e'] - m_start
-                                s_out, e_out = current_out_time + rel_s, current_out_time + rel_e
-                                lines.append(f"Dialogue: 0,{fmt_ass_time(s_out)},{fmt_ass_time(e_out)},Default,,0,0,0,,{r['t']}")
-                        current_out_time += (m_end - m_start)
-
-                    ass_path_final = os.path.join(self.base_dir, f"export_burn_{int(time.time())}.ass")
-                    with open(ass_path_final, 'w', encoding='utf-8-sig') as f:
-                        f.write(ass_header); f.write('\n'.join(lines))
+                    base_cues = build_subtitle_cues(self.results_data)
+                    burn_payload = {
+                        'style': self._get_subtitle_render_style(),
+                        'cues': remap_cues_for_merged_ranges(base_cues, merged),
+                    }
                 except Exception as e:
-                    print(f"[Error] Burn ASS Generation failed: {e}")
+                    print(f"[Error] Burn subtitle payload generation failed: {e}")
             
             settings = {'v_codec': media_info.get('v_codec', 'h264'), 'a_codec': media_info.get('a_codec', 'aac'), 'v_bitrate': f"{media_info.get('v_bitrate', 5000000) // 1000}k", 'a_bitrate': f"{media_info.get('a_bitrate', 128000) // 1000}k", 'fast_mode': fast}
-            threading.Thread(target=self.controller.run_editing, args=(self.current_video_path, save_path, self.results_data, self.stop_event, settings, ass_path_final), daemon=True).start()
+            threading.Thread(target=self.controller.run_editing, args=(self.current_video_path, save_path, self.results_data, self.stop_event, settings, burn_payload), daemon=True).start()
 
     def on_export_xml(self):
         save_path = filedialog.asksaveasfilename(defaultextension=".xml", filetypes=[("Final Cut Pro XML", "*.xml")], initialfile=f"Timeline_{os.path.splitext(os.path.basename(self.current_video_path))[0]}.xml")
@@ -1185,113 +1263,17 @@ class CustomModelApp:
         item = self.tree.identify_row(e.y)
         if item: self.tree.selection_set(item); self.menu.post(e.x_root, e.y_root)
     def apply_preview_subtitles(self, force_reload=False):
-        """[ASS 핫스왓] 사용자 디자인 설정을 반영한 ASS 파일을 동적 생성하여 VLC에 주입"""
-        if not self.results_data or not self.player: return
+        """사용자 디자인 설정을 반영한 live overlay 자막을 VLC에 즉시 반영"""
+        if not self.player:
+            return
+        if not self.results_data:
+            self.player.clear_live_subtitle()
+            self._live_overlay_cache = {}
+            return
         try:
-            # --- HEX(#RRGGBB) → ASS(&H00BBGGRR&) 변환 ---
-            def hex_to_ass(hex_color):
-                hex_color = hex_color.lstrip('#')
-                r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
-                return f"&H00{b:02X}{g:02X}{r:02X}&"
-            
-            # --- 사용자 UI 설정값 수집 ---
-            font_name = getattr(self, 'sub_font', None)
-            font_name = font_name.get() if font_name else '맑은 고딕'
-            font_size = getattr(self, 'sub_font_size', None)
-            font_size = font_size.get() if font_size else 40
-            color_f = getattr(self, 'sub_color_f', None)
-            color_f = color_f.get() if color_f else '#ffffff'
-            outline_w = getattr(self, 'sub_outline', None)
-            outline_w = outline_w.get() if outline_w else 3
-            color_o = getattr(self, 'sub_color_o', None)
-            color_o = color_o.get() if color_o else '#000000'
-            shadow_w = getattr(self, 'sub_shadow', None)
-            shadow_w = shadow_w.get() if shadow_w else 3
-            color_s = getattr(self, 'sub_color_s', None)
-            color_s = color_s.get() if color_s else '#000000'
-            margin_v = getattr(self, 'sub_y_pos', None)
-            margin_v = margin_v.get() if margin_v else 50
-            
-            ass_primary = hex_to_ass(color_f)
-            ass_outline = hex_to_ass(color_o)
-            ass_shadow = hex_to_ass(color_s)
-            
-            # --- ASS 헤더 작성 ---
-            ass_header = f"""[Script Info]
-Title: VAD AI Studio Preview
-ScriptType: v4.00+
-PlayResX: 1920
-PlayResY: 1080
-WrapStyle: 0
-ScaledBorderAndShadow: yes
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font_name},{font_size},{ass_primary},&H000000FF&,{ass_outline},{ass_shadow},-1,0,0,0,100,100,0,0,1,{outline_w},{shadow_w},2,10,10,{margin_v},1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-"""
-            # --- ASS 시간 포맷 H:MM:SS.cs ---
-            def fmt_ass_time(sec):
-                h = int(sec // 3600)
-                m = int((sec % 3600) // 60)
-                s = int(sec % 60)
-                cs = int((sec % 1) * 100)
-                return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
-            
-            _FILLERS = {'어', '음', '아', '으', '에', '이', '오', '우', '그', '저', '뭐', '막', '좀', '그냥'}
-
-            def _get_display_start(r):
-                """words가 있으면 첫 실제 단어의 시작 시간을 반환, 없으면 r['s'] 그대로"""
-                words = r.get('words', [])
-                if not words:
-                    return r['s']
-                for w in words:
-                    # words 항목은 dict 또는 dataclass 두 형태가 혼재하므로 둘 다 처리
-                    wt = w['word'].strip() if isinstance(w, dict) else w.word.strip()
-                    # [시니어] Whisper 특유의 문장부호(--, ...) 및 공백 제거
-                    wclean = wt.replace(' ', '').replace('.', '').replace(',', '').replace('-', '').replace('~', '')
-                    if not wclean: continue
-                    
-                    # 필러 단어이거나 1~3글자 반복(어어, 어어어 등)이면 건너뜜
-                    if wclean in _FILLERS or (len(wclean) <= 3 and len(set(wclean)) <= 1):
-                        continue
-                        
-                    ws = w['s'] if isinstance(w, dict) else w.s
-                    # 세그먼트 시작보다 1.5초 이상 늦으면 원본 유지 (너무 늦게 뜨는 것 방지)
-                    if ws - r['s'] > 1.5:
-                        return r['s']
-                    return ws
-                return r['s']
-
-            lines = []
-            for i, r in enumerate(self.results_data):
-                s_r = _get_display_start(r)  # 실제 단어 기준 표시 시작점
-                e_r = r['e']
-                if i < len(self.results_data) - 1 and e_r >= self.results_data[i+1]['s']:
-                    e_r = max(s_r + 0.1, self.results_data[i+1]['s'] - 0.05)
-                lines.append(f"Dialogue: 0,{fmt_ass_time(s_r)},{fmt_ass_time(e_r)},Default,,0,0,0,,{r['t']}")
-            
-            # --- A/B 핑퉁 핫스왓 ---
-            suffix = "A" if getattr(self, '_ping_pong', False) else "B"
-            self._ping_pong = not getattr(self, '_ping_pong', False)
-            _script_dir = self.base_dir
-            ass_name = os.path.join(_script_dir, f"temp_preview_{suffix}.ass")
-            
-            with open(ass_name, 'w', encoding='utf-8-sig') as f:
-                f.write(ass_header)
-                f.write('\n'.join(lines))
-                f.write('\n')
-            
-            self.preview_srt_path = ass_name
-            self.player.set_subtitle(ass_name)
-            
-            # [시니어 최적화] 일시정지 상태일 때 제자리 점프로 프레임 새로고침
-            if force_reload and not self.player.is_playing():
-                curr = self.player.get_time()
-                if curr >= 0:
-                    self.player.set_time(curr)
+            curr_ms = self.player.get_time()
+            curr_sec = max(0.0, (curr_ms / 1000.0)) if curr_ms and curr_ms >= 0 else 0.0
+            self._apply_live_overlay_for_time(curr_sec, force=force_reload)
         except Exception as e:
             import traceback; traceback.print_exc()
             print(f'[ERROR] apply_preview_subtitles 실패: {e}')
@@ -1353,12 +1335,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 self._smooth_ms = curr_ms + (time.time() - self._vlc_clock) * 1000.0
             else:
                 self._smooth_ms = curr_ms
+
+            curr_sec = max(0.0, self._smooth_ms / 1000.0) if self._smooth_ms >= 0 else 0.0
             
             if self._smooth_ms >= 0 and total_ms > 0:
                 c_m, c_s = divmod(int(self._smooth_ms/1000), 60); t_m, t_s = divmod(int(total_ms/1000), 60); self.lbl_time.config(text=f"{c_m:02d}:{c_s:02d} / {t_m:02d}:{t_s:02d}")
                 
                 # [사용자 요청] 현재 재생 중인 자막 찾기 및 강조 (이제 초정밀 시계 사용)
-                curr_sec = self._smooth_ms / 1000.0
                 active_idx = -1
                 for i, r in enumerate(self.results_data):
                     if r['s'] <= curr_sec <= r['e']:
@@ -1387,6 +1370,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     self.block_editor.set_active_time(curr_sec)
 
             if hasattr(self, 'btn_play'): self.btn_play.config(text=self.ICON_PAUSE if self.player.is_playing() else self.ICON_PLAY)
+            if getattr(self, 'use_live_overlay_preview', False):
+                self._apply_live_overlay_for_time(curr_sec)
         
         # 실시간성 향상을 위해 16ms 주기로 변경 (초당 ~60프레임)
         self.root.after(16, self.update_loop)
@@ -1431,6 +1416,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if fmt == "FCPXML":
             self.on_export_xml()
             return
+        cues = build_subtitle_cues(self.results_data)
             
         ext = "." + fmt.lower()
         initial = os.path.splitext(os.path.basename(self.current_video_path))[0]
@@ -1438,22 +1424,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if file_path:
             with open(file_path, "w", encoding="utf-8") as f:
                 if fmt == "SRT":
-                    for i, r in enumerate(self.results_data):
-                        s_r, e_r = r['s'], r['e']
-                        if i < len(self.results_data) - 1 and e_r >= self.results_data[i+1]['s']: e_r = max(s_r + 0.1, self.results_data[i+1]['s'] - 0.05)
-                        s = time.strftime('%H:%M:%S', time.gmtime(s_r)) + f",{int((s_r%1)*1000):03d}"; e = time.strftime('%H:%M:%S', time.gmtime(e_r)) + f",{int((e_r%1)*1000):03d}"; f.write(f"{i+1}\n{s} --> {e}\n{r['t']}\n\n")
+                    f.write(cues_to_srt(cues))
                 elif fmt == "TXT":
-                    for r in self.results_data: f.write(f"[{round(r['s'], 2)}s] {r['t']}\n")
+                    for cue in cues: f.write(f"[{round(cue.start, 2)}s] {cue.text}\n")
                 elif fmt == "VTT":
-                    f.write("WEBVTT\n\n")
-                    for i, r in enumerate(self.results_data):
-                        s_r, e_r = r['s'], r['e']
-                        if i < len(self.results_data) - 1 and e_r >= self.results_data[i+1]['s']: e_r = max(s_r + 0.1, self.results_data[i+1]['s'] - 0.05)
-                        s = time.strftime('%H:%M:%S', time.gmtime(s_r)) + f".{int((s_r%1)*1000):03d}"; e = time.strftime('%H:%M:%S', time.gmtime(e_r)) + f".{int((e_r%1)*1000):03d}"; f.write(f"{i+1}\n{s} --> {e}\n{r['t']}\n\n")
+                    f.write(cues_to_vtt(cues))
                 elif fmt == "CSV":
                     import csv
                     writer = csv.writer(f)
                     writer.writerow(["Index", "Start", "End", "Text"])
-                    for i, r in enumerate(self.results_data):
-                        writer.writerow([i+1, r['s'], r['e'], r['t']])
+                    for i, cue in enumerate(cues):
+                        writer.writerow([i+1, cue.start, cue.end, cue.text])
             messagebox.showinfo("완료", "저장되었습니다.")

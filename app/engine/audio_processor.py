@@ -6,7 +6,7 @@ import re
 import gc
 import torch
 import torchaudio.functional as AF
-from config_models import TranscriptSegment
+from app.core.config_models import TranscriptSegment
 
 try:
     from demucs.pretrained import get_model as demucs_get_model

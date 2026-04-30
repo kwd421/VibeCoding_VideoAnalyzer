@@ -86,7 +86,7 @@ def main():
         update_startup_progress(splash, bar, msg_label, pct_label, 20, "Loading modules...")
 
         try:
-            from gui_app import CustomModelApp
+            from app.ui.gui_app import CustomModelApp
             update_startup_progress(splash, bar, msg_label, pct_label, 35, "Initializing application...")
 
             def startup_progress(percent, message):

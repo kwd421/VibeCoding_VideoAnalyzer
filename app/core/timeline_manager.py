@@ -1,6 +1,6 @@
 import copy
 from typing import List, Dict, Any, Callable
-from config_models import TranscriptSegment
+from app.core.config_models import TranscriptSegment
 
 class TranscriptManager:
     """[시니어 상태 관리] 전체 트랜스크립트 딕셔너리 리스트 상태를 관리하는 중앙 통제소"""

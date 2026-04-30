@@ -6,7 +6,7 @@ import tempfile
 import shutil
 import imageio_ffmpeg
 from typing import List, Dict, Tuple, Optional, Callable
-from subtitle_cues import SubtitleRenderStyle, SubtitleCue, ffmpeg_color, escape_ffmpeg_value
+from app.core.subtitle_cues import SubtitleRenderStyle, SubtitleCue, ffmpeg_color, escape_ffmpeg_value
 
 class VideoEditor:
     """비디오 편집 엔진 (Match Source, Stream Copy 및 프리미어/리졸브 완벽 호환 XML 지원)"""
@@ -15,7 +15,7 @@ class VideoEditor:
         self.ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
         self.threads = 8 
         # [시니어] CWD가 System32 등 엉뚱한 곳일 경우를 대비한 기준 경로 확보
-        self.base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     @staticmethod
     def get_merged_segments_info(segments: List[Dict], gap_threshold: float = 2.0) -> Tuple[List[Tuple[float, float]], float]:

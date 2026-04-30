@@ -1,6 +1,10 @@
 __pycache__/
 .venv/
 deprecated/
+backup/
+*.bak
+*.bak.*
+app/models/
 *.wav
 *.srt
 *.mp4
