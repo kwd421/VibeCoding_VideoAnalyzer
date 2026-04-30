@@ -1,10 +1,16 @@
 # VibeCoding Video Analyzer
 
+[English README](README.md)
+
 로컬 영상 전사, 자막 타이밍 편집, 영상 위 자막 미리보기, 자막/타임라인 내보내기를 위한 데스크톱 앱입니다.
 
 현재 프로젝트는 기존 영상 분석 워크플로를 Python/Tk 기반 macOS 개발 흐름에 맞춰 정리한 상태입니다. 분석은 가능한 한 로컬에서 처리하고, 사용자가 에디터에서 보는 자막 시간과 실제 미리보기/내보내기 시간이 최대한 동일하게 이어지도록 맞추는 것을 핵심 목표로 둡니다.
 
-[English README](README.md)
+## 미리보기
+
+[![VibeCoding Video Analyzer 미리보기](https://img.youtube.com/vi/_hM43KQNOYo/maxresdefault.jpg)](https://www.youtube.com/watch?v=_hM43KQNOYo)
+
+[유튜브에서 미리보기 보기](https://www.youtube.com/watch?v=_hM43KQNOYo)
 
 ## 현재 상태
 
