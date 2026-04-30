@@ -2,6 +2,8 @@
 
 [한국어 README 보기](README.ko.md)
 
+> Development backup repository. This is not a ready-to-install public release yet.
+
 A local-first desktop video transcription, subtitle editing, preview, and export tool.
 
 The current project is a Python/Tk macOS-focused build of the original video analyzer workflow. It keeps the analysis pipeline local where possible, exposes timing controls for subtitle correction, and previews subtitles directly on top of the video.
