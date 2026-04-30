@@ -16,7 +16,6 @@
 
 - 개발 브랜치: `mac-experiment`
 - 실행 진입점: `main.py`
-- 현재 구조: 주요 기능을 `app/` 패키지 하위로 분리
 - 자막 미리보기: 임시 ASS 파일 대신 정규화된 subtitle cue 기반 라이브 오버레이
 - 내보내기: 자막 포맷, FCPXML, 영상 렌더/자막 번인 지원
 - 실험 옵션: WhisperX 정렬, Demucs 보컬 분리, Gemma 4 MLX 이상 세그먼트 필터
@@ -33,46 +32,28 @@
 - `SRT`, `VTT`, `TXT`, `CSV`, `FCPXML` 형식으로 내보낼 수 있습니다.
 - FFmpeg drawtext 필터를 생성해 자막 번인 렌더링을 수행할 수 있습니다.
 
-## 프로젝트 구조
-
-```text
-.
-├── main.py                         # 앱 실행 진입점
-├── run.command                     # macOS용 실행 스크립트
-├── app/
-│   ├── ui/                         # Tk UI, 단어 편집기, 비디오 플레이어 오버레이
-│   ├── engine/                     # 분석 컨트롤러, 핵심 파이프라인, 오디오/비전 처리
-│   ├── core/                       # 설정, 타임라인, 자막 cue, 텍스트 유틸리티
-│   └── media/                      # 영상 렌더링, XML/export 도우미
-├── tools/                          # CoreML 전사 워커 등 보조 스크립트
-├── tests/                          # 타이밍, 분할, cue 회귀 테스트
-├── docs/                           # 설계 메모와 구현 계획
-├── DEPLOYMENT.md                   # 패키징 메모
-├── HANDOFF.md                      # 프로젝트 인수인계/현황 메모
-└── VibeAnalyzer.spec               # Windows 빌드 흐름에서 쓰는 PyInstaller spec
-```
-
 ## 실행 요구사항
 
 - 현재 주 개발 대상은 macOS입니다.
-- 프로젝트 루트에 `.venv/` 가 필요합니다.
+- Python이 필요합니다. `.venv/` 가상환경은 개발용으로 권장되지만, GitHub에서 내려받아야 하는 앱 파일은 아닙니다.
 - 내장 영상 미리보기를 위해 VLC와 Python `vlc` 패키지가 필요합니다.
 - 영상 처리와 렌더링에는 프로젝트 런타임 의존성의 FFmpeg 경로가 필요합니다.
 - 로컬 모델 경로를 사용할 경우 `models/` 아래에 모델 파일이 있어야 합니다.
 - WhisperX, Demucs, MLX, CoreML/whisper.cpp, 디노이즈, VAD 관련 패키지는 해당 옵션을 켤 때만 필요합니다.
 
-현재 저장소에는 완전한 dependency lockfile이 없으므로, 당장의 개발 기준은 로컬 `.venv` 환경입니다.
+현재는 GitHub에서 저장소만 받는다고 바로 실행되는 상태는 아닙니다. 소스코드는 GitHub에 있지만, 런타임 의존성, 로컬 모델 파일, Python 실행 환경은 별도로 준비해야 합니다. “다운로드 후 바로 실행”을 목표로 한다면 Python 환경을 요구하지 않는 패키징된 앱/빌드 산출물이 필요합니다.
 
 ## 실행 방법
+
+이미 준비된 `.venv/` 가 있다면:
 
 ```bash
 ./run.command
 ```
 
-또는:
+다른 Python 환경에 의존성이 설치되어 있다면:
 
 ```bash
-source .venv/bin/activate
 python main.py
 ```
 

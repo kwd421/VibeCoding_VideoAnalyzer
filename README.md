@@ -16,7 +16,6 @@ The current project is a Python/Tk macOS-focused build of the original video ana
 
 - Main branch in active development: `mac-experiment`
 - Runtime target: local desktop app launched from `main.py`
-- Current architecture: feature modules under `app/`
 - Preview direction: live in-app subtitle overlay from normalized subtitle cues
 - Export direction: subtitle/text exports plus video render/burn support
 - Experimental options: WhisperX alignment, Demucs vocal separation, Gemma 4 MLX suspicious-segment filtering
@@ -33,46 +32,28 @@ The current project is a Python/Tk macOS-focused build of the original video ana
 - Export subtitles as `SRT`, `VTT`, `TXT`, `CSV`, and `FCPXML`.
 - Render video ranges and optionally burn subtitles using FFmpeg drawtext filters generated from subtitle cues.
 
-## Project Layout
-
-```text
-.
-├── main.py                         # App entry point
-├── run.command                     # macOS launcher using .venv/bin/python
-├── app/
-│   ├── ui/                         # Tk UI, word editor, video player overlay
-│   ├── engine/                     # Analysis controller, core pipeline, audio/vision helpers
-│   ├── core/                       # Shared config, timeline, subtitle cue, text utilities
-│   └── media/                      # Video rendering and XML/export helpers
-├── tools/                          # Helper workers, including CoreML transcription worker
-├── tests/                          # Regression tests for timing, split, and cue behavior
-├── docs/                           # Design notes and implementation plans
-├── DEPLOYMENT.md                   # Packaging notes
-├── HANDOFF.md                      # Project handoff/context notes
-└── VibeAnalyzer.spec               # PyInstaller spec used by the Windows build flow
-```
-
 ## Requirements
 
 - macOS is the current active development target.
-- Python virtual environment at `.venv/`.
+- Python is required. A `.venv/` virtual environment is recommended for development, but it is not a file that should be downloaded from GitHub.
 - VLC and the Python `vlc` package for embedded preview playback.
 - FFmpeg access through the runtime dependencies used by the project.
 - Local model files under `models/` when using bundled/local model paths.
 - Optional packages depend on the selected feature: WhisperX, Demucs, MLX, CoreML/whisper.cpp, denoise, and VAD paths are loaded only when those options are used.
 
-This repository currently does not include a complete dependency lockfile, so the existing local `.venv` is the source of truth for day-to-day development.
+Cloning the repository alone is not enough for a fresh machine yet. The app source is on GitHub, but runtime dependencies, local model files, and the Python environment still need to be installed separately. A packaged app/build artifact is the right path if the goal is "download and run" without setting up Python.
 
 ## Run
+
+If you already have a prepared `.venv/`:
 
 ```bash
 ./run.command
 ```
 
-Or:
+If dependencies are installed in another Python environment:
 
 ```bash
-source .venv/bin/activate
 python main.py
 ```
 
