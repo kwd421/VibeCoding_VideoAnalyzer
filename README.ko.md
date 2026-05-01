@@ -10,9 +10,9 @@
 
 ## 미리보기
 
-[![VibeCoding Video Analyzer 미리보기](https://img.youtube.com/vi/_hM43KQNOYo/maxresdefault.jpg)](https://www.youtube.com/watch?v=_hM43KQNOYo)
+[![VibeCoding Video Analyzer 미리보기](https://img.youtube.com/vi/QM7P5UEvVbk/maxresdefault.jpg)](https://www.youtube.com/watch?v=QM7P5UEvVbk)
 
-[유튜브에서 미리보기 보기](https://www.youtube.com/watch?v=_hM43KQNOYo)
+[유튜브에서 미리보기 보기](https://www.youtube.com/watch?v=QM7P5UEvVbk)
 
 ## 현재 상태
 

@@ -10,9 +10,9 @@ The current project is a Python/Tk macOS-focused build of the original video ana
 
 ## Preview
 
-[![VibeCoding Video Analyzer preview](https://img.youtube.com/vi/_hM43KQNOYo/maxresdefault.jpg)](https://www.youtube.com/watch?v=_hM43KQNOYo)
+[![VibeCoding Video Analyzer preview](https://img.youtube.com/vi/QM7P5UEvVbk/maxresdefault.jpg)](https://www.youtube.com/watch?v=QM7P5UEvVbk)
 
-[Watch the preview on YouTube](https://www.youtube.com/watch?v=_hM43KQNOYo)
+[Watch the preview on YouTube](https://www.youtube.com/watch?v=QM7P5UEvVbk)
 
 ## Current Status
 
