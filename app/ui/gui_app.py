@@ -119,7 +119,14 @@ class CustomModelApp:
             pass
 
     def _get_subtitle_entries_no_overlap(self, use_display_start=False):
-        return cues_to_entries(build_subtitle_cues(self.results_data))
+        if not hasattr(self, "_subtitle_entries_cache"):
+            self._subtitle_entries_cache = None
+        if self._subtitle_entries_cache is None:
+            self._subtitle_entries_cache = cues_to_entries(build_subtitle_cues(self.results_data))
+        return self._subtitle_entries_cache
+
+    def _invalidate_subtitle_entries_cache(self):
+        self._subtitle_entries_cache = None
 
     def _get_subtitle_render_style(self):
         return SubtitleRenderStyle(
@@ -253,6 +260,7 @@ class CustomModelApp:
         self._preview_after_id = None
         self.use_live_overlay_preview = True
         self._live_overlay_cache = {}
+        self._subtitle_entries_cache = None
         self.transcript_manager = TranscriptManager()
         self.current_video_path = None
         self.is_seeking = False
@@ -1177,7 +1185,8 @@ class CustomModelApp:
             if getattr(self, "notebook", None) and self.notebook.index(self.notebook.select()) == 0:
                 self.block_editor.render_block_view()
         
-        self.apply_preview_subtitles(force_reload=True)
+        self._invalidate_subtitle_entries_cache()
+        self._schedule_preview_reload(force_reload=True, delay_ms=80)
 
 
 
@@ -1266,9 +1275,20 @@ class CustomModelApp:
         """사용자 디자인 설정을 반영한 live overlay 자막을 VLC에 즉시 반영"""
         if not self.player:
             return
+        if force_reload:
+            invalidate = getattr(self, "_invalidate_subtitle_entries_cache", None)
+            if callable(invalidate):
+                invalidate()
+            else:
+                self._subtitle_entries_cache = None
         if not self.results_data:
             self.player.clear_live_subtitle()
             self._live_overlay_cache = {}
+            invalidate = getattr(self, "_invalidate_subtitle_entries_cache", None)
+            if callable(invalidate):
+                invalidate()
+            else:
+                self._subtitle_entries_cache = None
             return
         try:
             curr_ms = self.player.get_time()

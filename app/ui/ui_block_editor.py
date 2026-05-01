@@ -546,8 +546,6 @@ class UIBlockEditor:
     def rebuild_tree_and_render(self, fast=False):
         # 트리뷰 갱신 요청을 부모에게 전달
         self.on_tree_rebuild_request(fast=fast)
-        if not fast:
-            self.render_block_view()
 
     def on_block_right_click(self, event):
         x, y = self.block_canvas.canvasx(event.x), self.block_canvas.canvasy(event.y)
