@@ -12,6 +12,8 @@
 - Word/block editor: `ui_block_editor.py`
 - Playback wrapper: `video_player.py`
 - Timeline state: `timeline_manager.py`
+- Headless transcript exporter: `transcribe_cli.py`
+- Versioned transcript exchange: `transcript_exchange.py`
 
 ## Rules To Read First
 - `CODEX.md`
@@ -32,6 +34,42 @@
 - Bundled Faster-Whisper models are preferred over remote download when available.
 - `VibeAnalyzer.spec` was recreated so the Windows build script has a real target again.
 - Deployment notes are documented in `DEPLOYMENT.md`.
+
+## Transcript Exchange Addition
+
+Branch: `agent/transcript-exchange`
+
+The new integration is deliberately isolated from GUI, playback, block highlighting, and core word-timing algorithms.
+
+- `transcript_exchange.py`
+  - standard-library only;
+  - normalizes existing `TranscriptSegment(s,e,t,words)` and legacy dictionaries;
+  - preserves word-level timestamps in `vibe-video-analyzer/transcript` schema version 1;
+  - validates ordering and finite time values;
+  - writes JSON without replacing an existing file unless overwrite is explicit.
+- `transcribe_cli.py`
+  - launches no GUI or VLC;
+  - lazily imports the existing transcription engine after argument parsing;
+  - always requests word timestamps;
+  - supports existing Faster-Whisper, VAD, denoise, and optional WhisperX settings;
+  - emits `<input>.vibe-transcript.json` by default.
+- `test_transcript_exchange.py`
+  - runs without media/model dependencies;
+  - covers dataclass/dict normalization, word preservation, round-trip JSON, ordering rejection, protected writes, and dependency-free CLI help.
+- `.github/workflows/transcript-exchange.yml`
+  - runs only the lightweight exchange test on Python 3.9 and 3.12.
+
+The intended downstream consumer is Apple Pro Video MCP:
+
+```text
+Vibe transcript JSON
+  → vibe_transcript_import
+  → highlight_rank
+  → edit_plan_build
+  → FCPXML + SRT
+```
+
+Do not claim actual transcription runtime verification until the project environment and models are restored on the Mac.
 
 ## Current macOS Status
 - Source-level macOS fixes were applied for VLC embedding and a few UI behaviors.
@@ -63,6 +101,7 @@ Checked on 2026-03-20:
   - user requested full rollback.
 - Result: those sync experiments were reverted.
 - Current guidance: do not re-apply word timing changes directly in core paths without a clearly isolated experimental toggle.
+- The transcript exchange addition does not alter those paths; it serializes their current outputs.
 
 ## Known Active Concerns
 - Word-level highlight sync is still imperfect.
@@ -74,6 +113,7 @@ Checked on 2026-03-20:
   - use an experimental on/off toggle,
   - avoid changing default behavior first,
   - test against real sample clips before keeping changes.
+- The headless CLI runtime has not yet been exercised on the target Mac.
 
 ## User Preferences
 - Functionality breakage is unacceptable.
@@ -85,10 +125,14 @@ Checked on 2026-03-20:
 ## Suggested Workflow For Next Session
 1. Read `CODEX.md` and `GEMINI.md`.
 2. Read this file.
-3. Check `git status`.
-4. If working on macOS runtime, restore a usable Python environment first.
-5. Install missing dependencies and restore `models/` before judging runtime behavior.
-6. Keep risky sync logic behind toggles.
+3. Check `git status` and use `agent/transcript-exchange` for the new exchange work.
+4. Run `python -m unittest -v test_transcript_exchange.py` before restoring heavy dependencies.
+5. If working on macOS runtime, restore a usable Python environment first.
+6. Install missing dependencies and restore `models/` before judging runtime behavior.
+7. Run `python transcribe_cli.py --help`.
+8. Transcribe one short clip to a new JSON path without overwrite.
+9. Inspect segment and word timestamps and hand the file to Apple Pro Video MCP.
+10. Keep risky sync logic behind toggles.
 
 ## Files Worth Inspecting For Future Work
 - `main.py`: startup splash and boot flow
@@ -96,6 +140,8 @@ Checked on 2026-03-20:
 - `engine_core.py`: ASR pipeline and word timestamp generation
 - `ui_block_editor.py`: active word highlighting logic
 - `video_player.py`: VLC timing behavior and platform embedding
+- `transcript_exchange.py`: stable interchange contract
+- `transcribe_cli.py`: headless ASR entry point
 
 ## Testing Notes
 - For startup behavior, verify the splash appears before heavy import work and reaches 100%.
@@ -103,6 +149,7 @@ Checked on 2026-03-20:
 - For macOS runtime, verify VLC video renders inside the Tk window and subtitle preview still works.
 - For sync work, always test on a real problematic sample, not just synthetic assumptions.
 - If sync work is experimental, provide a rollback path and default it to off.
+- For transcript exchange, preserve existing JSON by default and compare the exported word times to the in-memory transcript.
 
 ## Current Non-Code Diffs
 - Temporary preview subtitle files like `temp_preview_A.ass` and `temp_preview_B.ass` may be modified during app usage.
