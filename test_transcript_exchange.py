@@ -101,7 +101,8 @@ class TranscriptExchangeTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertIn("vibe-transcript.json", completed.stdout)
+        self.assertIn("Transcribe a local video/audio file", completed.stdout)
+        self.assertIn("--whisperx-align", completed.stdout)
 
 
 if __name__ == "__main__":
